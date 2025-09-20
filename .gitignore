@@ -14,9 +14,6 @@
 # Linker files
 *.ilk
 
-# Debugger Files
-*.pdb
-
 # Compiled Dynamic libraries
 *.so
 *.dylib
@@ -39,3 +36,38 @@
 
 # debug information files
 *.dwo
+
+# CLion
+/cmake-build-debug
+.idea
+
+# Build artifacts
+/build/
+/bin/
+/obj/
+
+# ---- Visual Studio Code ----
+.vscode/
+*.code-workspace
+
+# ---- Shader Binaries ----
+*.spv
+
+# ---- Visual Studio ----
+*.sln
+*.vcxproj
+*.vcxproj.*
+*.vcxproj.filters
+*.vcxproj.user
+*.opensdf
+*.sdf
+*.suo
+*.pdb
+*.idb
+
+# ---- GLFW (submodule build artifacts) ----
+external/glfw/build/
+external/glfw/bin/
+external/glfw/lib/
+external/glfw/CMakeFiles/
+external/glfw/CMakeCache.txt
