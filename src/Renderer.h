@@ -14,13 +14,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "vulkan/VulkanContext.h"
-
-// Struktur zur Speicherung der Swapchain-Unterstützungsdetails
-struct SwapchainSupportDetails {
-    VkSurfaceCapabilitiesKHR capabilities;
-    std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR> presentModes;
-};
+#include "vulkan/VulkanSwapchain.h"
 
 // Vertex-Struktur für unser Dreieck
 struct Vertex {
@@ -95,8 +89,6 @@ public:
 
 private:
     void initVulkan();
-    void createSwapchain();
-    void createImageViews();
     void createRenderPass();
     void createDepthResources();
     void createGraphicsPipeline();
@@ -151,10 +143,6 @@ private:
     VkImageView createImageView(VkImage image, VkFormat format, uint32_t mipLevels = 1);
 
     // Helper Functions
-    SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice device);
-    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
-    VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
-    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
     VkShaderModule createShaderModule(const std::vector<char>& code);
     uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
@@ -184,11 +172,9 @@ private:
     // Vulkan Core (Instance, Device, Queues, Surface)
     VulkanContext context;
 
-    VkSwapchainKHR swapchain;
-    std::vector<VkImage> swapchainImages;
-    VkFormat swapchainImageFormat;
-    VkExtent2D swapchainExtent;
-    std::vector<VkImageView> swapchainImageViews;
+    // Vulkan Swapchain (Presentation images & image views)
+    VulkanSwapchain swapchain;
+
     std::vector<VkFramebuffer> swapchainFramebuffers;
 
     VkRenderPass renderPass;

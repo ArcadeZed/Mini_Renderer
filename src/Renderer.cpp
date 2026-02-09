@@ -58,8 +58,9 @@ void Renderer::initVulkan() {
     // Initialize Vulkan Core (Instance, Device, Queues, Surface)
     context.init(window, enableValidationLayers);
 
-    createSwapchain();
-    createImageViews();
+    // Initialize Swapchain (Presentation images & image views)
+    swapchain.init(&context, window);
+
     createRenderPass();
     createDepthResources();  // Create depth buffer (BEFORE framebuffers!)
     createDescriptorSetLayout();
@@ -81,154 +82,11 @@ void Renderer::initVulkan() {
     createSyncObjects();
 }
 
-void Renderer::createSwapchain() {
-    SwapchainSupportDetails swapchainSupport = querySwapchainSupport(context.getPhysicalDevice());
-
-    VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapchainSupport.formats);
-    VkPresentModeKHR presentMode = chooseSwapPresentMode(swapchainSupport.presentModes);
-    VkExtent2D extent = chooseSwapExtent(swapchainSupport.capabilities);
-
-    uint32_t imageCount = swapchainSupport.capabilities.minImageCount + 1;
-    if (swapchainSupport.capabilities.maxImageCount > 0 && imageCount > swapchainSupport.capabilities.maxImageCount) {
-        imageCount = swapchainSupport.capabilities.maxImageCount;
-    }
-
-    VkSwapchainCreateInfoKHR createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    createInfo.surface = context.getSurface();
-    createInfo.minImageCount = imageCount;
-    createInfo.imageFormat = surfaceFormat.format;
-    createInfo.imageColorSpace = surfaceFormat.colorSpace;
-    createInfo.imageExtent = extent;
-    createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-    uint32_t graphicsFamily = context.getGraphicsQueueFamily();
-    uint32_t presentFamily = context.getPresentQueueFamily();
-    uint32_t queueFamilyIndices[] = {graphicsFamily, presentFamily};
-
-    if (graphicsFamily != presentFamily) {
-        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        createInfo.queueFamilyIndexCount = 2;
-        createInfo.pQueueFamilyIndices = queueFamilyIndices;
-    } else {
-        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        createInfo.queueFamilyIndexCount = 0; // Optional
-        createInfo.pQueueFamilyIndices = nullptr; // Optional
-    }
-
-    createInfo.preTransform = swapchainSupport.capabilities.currentTransform;
-    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    createInfo.presentMode = presentMode;
-    createInfo.clipped = VK_TRUE;
-    createInfo.oldSwapchain = VK_NULL_HANDLE;
-
-    if (vkCreateSwapchainKHR(context.getDevice(), &createInfo, nullptr, &swapchain) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create swap chain!");
-    }
-
-    vkGetSwapchainImagesKHR(context.getDevice(), swapchain, &imageCount, nullptr);
-    swapchainImages.resize(imageCount);
-    vkGetSwapchainImagesKHR(context.getDevice(), swapchain, &imageCount, swapchainImages.data());
-
-    swapchainImageFormat = surfaceFormat.format;
-    swapchainExtent = extent;
-    std::cout << "Swapchain created." << std::endl;
-}
-
-// ============================================================================
-// SWAPCHAIN HELPER FUNCTIONS
-// ============================================================================
-
-SwapchainSupportDetails Renderer::querySwapchainSupport(VkPhysicalDevice device) {
-    SwapchainSupportDetails details;
-
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, context.getSurface(), &details.capabilities);
-
-    uint32_t formatCount;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(device, context.getSurface(), &formatCount, nullptr);
-    if (formatCount != 0) {
-        details.formats.resize(formatCount);
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, context.getSurface(), &formatCount, details.formats.data());
-    }
-
-    uint32_t presentModeCount;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(device, context.getSurface(), &presentModeCount, nullptr);
-    if (presentModeCount != 0) {
-        details.presentModes.resize(presentModeCount);
-        vkGetPhysicalDeviceSurfacePresentModesKHR(device, context.getSurface(), &presentModeCount, details.presentModes.data());
-    }
-
-    return details;
-}
-
-VkSurfaceFormatKHR Renderer::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-    for (const auto& availableFormat : availableFormats) {
-        if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            return availableFormat;
-        }
-    }
-    return availableFormats[0];
-}
-
-VkPresentModeKHR Renderer::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
-    for (const auto& availablePresentMode : availablePresentModes) {
-        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            return availablePresentMode;
-        }
-    }
-    return VK_PRESENT_MODE_FIFO_KHR;
-}
-
-VkExtent2D Renderer::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
-    if (capabilities.currentExtent.width != UINT32_MAX) {
-        return capabilities.currentExtent;
-    } else {
-        int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
-
-        VkExtent2D actualExtent = {
-                static_cast<uint32_t>(width),
-                static_cast<uint32_t>(height)
-        };
-
-        actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-        actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-
-        return actualExtent;
-    }
-}
-
-void Renderer::createImageViews() {
-    swapchainImageViews.resize(swapchainImages.size());
-
-    for (size_t i = 0; i < swapchainImages.size(); i++) {
-        VkImageViewCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        createInfo.image = swapchainImages[i];
-        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        createInfo.format = swapchainImageFormat;
-        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        createInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(context.getDevice(), &createInfo, nullptr, &swapchainImageViews[i]) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create image views!");
-        }
-    }
-    std::cout << "Image views created." << std::endl;
-}
 
 void Renderer::createRenderPass() {
     // Color attachment
     VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = swapchainImageFormat;
+    colorAttachment.format = swapchain.getImageFormat();
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -333,14 +191,14 @@ void Renderer::createGraphicsPipeline() {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float)swapchainExtent.width;
-    viewport.height = (float)swapchainExtent.height;
+    viewport.width = (float)swapchain.getExtent().width;
+    viewport.height = (float)swapchain.getExtent().height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent = swapchainExtent;
+    scissor.extent = swapchain.getExtent();
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -492,14 +350,14 @@ void Renderer::createDebugPipeline() {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float)swapchainExtent.width;
-    viewport.height = (float)swapchainExtent.height;
+    viewport.width = (float)swapchain.getExtent().width;
+    viewport.height = (float)swapchain.getExtent().height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent = swapchainExtent;
+    scissor.extent = swapchain.getExtent();
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -629,14 +487,14 @@ void Renderer::createInfiniteGridPipeline() {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float)swapchainExtent.width;
-    viewport.height = (float)swapchainExtent.height;
+    viewport.width = (float)swapchain.getExtent().width;
+    viewport.height = (float)swapchain.getExtent().height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent = swapchainExtent;
+    scissor.extent = swapchain.getExtent();
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -864,7 +722,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage) {
     // Projection Matrix
     ubo.proj = glm::perspective(
         glm::radians(88.0f),           // Etwas weiteres FOV für bessere Übersicht
-        swapchainExtent.width / (float)swapchainExtent.height,
+        swapchain.getExtent().width / (float)swapchain.getExtent().height,
         0.1f,
         1000.0f                         // Weitere Far Plane für größere Szenen
     );
@@ -906,11 +764,11 @@ VkShaderModule Renderer::createShaderModule(const std::vector<char>& code) {
 }
 
 void Renderer::createFramebuffers() {
-    swapchainFramebuffers.resize(swapchainImageViews.size());
+    swapchainFramebuffers.resize(swapchain.getImageViews().size());
 
-    for (size_t i = 0; i < swapchainImageViews.size(); i++) {
+    for (size_t i = 0; i < swapchain.getImageViews().size(); i++) {
         std::array<VkImageView, 2> attachments = {
-                swapchainImageViews[i],
+                swapchain.getImageViews()[i],
                 depthImageView  // Add depth attachment
         };
 
@@ -919,8 +777,8 @@ void Renderer::createFramebuffers() {
         framebufferInfo.renderPass = renderPass;
         framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
         framebufferInfo.pAttachments = attachments.data();
-        framebufferInfo.width = swapchainExtent.width;
-        framebufferInfo.height = swapchainExtent.height;
+        framebufferInfo.width = swapchain.getExtent().width;
+        framebufferInfo.height = swapchain.getExtent().height;
         framebufferInfo.layers = 1;
 
         if (vkCreateFramebuffer(context.getDevice(), &framebufferInfo, nullptr, &swapchainFramebuffers[i]) != VK_SUCCESS) {
@@ -1322,7 +1180,7 @@ void Renderer::createCommandBuffers() {
         renderPassInfo.renderPass = renderPass;
         renderPassInfo.framebuffer = swapchainFramebuffers[i];
         renderPassInfo.renderArea.offset = {0, 0};
-        renderPassInfo.renderArea.extent = swapchainExtent;
+        renderPassInfo.renderArea.extent = swapchain.getExtent();
 
         // Clear values: Color + Depth
         std::array<VkClearValue, 2> clearValues{};
@@ -1406,7 +1264,7 @@ void Renderer::createSyncObjects() {
     imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
     inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
-    imagesInFlight.resize(swapchainImages.size(), VK_NULL_HANDLE);
+    imagesInFlight.resize(swapchain.getImages().size(), VK_NULL_HANDLE);
 
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -1432,7 +1290,7 @@ void Renderer::drawFrame() {
 
     uint32_t imageIndex;
     // 2. Fordere ein Bild von der Swapchain an. imageAvailableSemaphores[currentFrame] wird signalisiert, wenn es bereit ist.
-    vkAcquireNextImageKHR(context.getDevice(), swapchain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+    vkAcquireNextImageKHR(context.getDevice(), swapchain.getSwapchain(), UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
     // 3. *WICHTIGE ERGÄNZUNG*: Prüfe, ob das *gerade erworbene Bild* (imageIndex) bereits von einem anderen Frame
     // in Bearbeitung ist (d.h., ob es noch einen Zaun gibt, auf den gewartet werden muss, weil ein früherer Frame
@@ -1478,7 +1336,7 @@ void Renderer::drawFrame() {
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores; // Präsentations-Engine wartet auf das Render-End-Semaphore dieses Frames
 
-    VkSwapchainKHR swapchains[] = {swapchain};
+    VkSwapchainKHR swapchains[] = {swapchain.getSwapchain()};
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
@@ -1877,10 +1735,8 @@ void Renderer::cleanup() {
 
     vkDestroyRenderPass(context.getDevice(), renderPass, nullptr);
 
-    for (auto imageView : swapchainImageViews) {
-        vkDestroyImageView(context.getDevice(), imageView, nullptr);
-    }
-    vkDestroySwapchainKHR(context.getDevice(), swapchain, nullptr);
+    // Cleanup Swapchain (Image Views, Swapchain) - BEFORE VulkanContext!
+    swapchain.cleanup();
 
     // Cleanup VulkanContext (Device, Surface, Instance) - MUST BE LAST!
     context.cleanup();
@@ -1922,7 +1778,7 @@ bool Renderer::hasStencilComponent(VkFormat format) {
 void Renderer::createDepthResources() {
     VkFormat depthFormat = findDepthFormat();
 
-    createImage(swapchainExtent.width, swapchainExtent.height, 1, depthFormat, VK_IMAGE_TILING_OPTIMAL,
+    createImage(swapchain.getExtent().width, swapchain.getExtent().height, 1, depthFormat, VK_IMAGE_TILING_OPTIMAL,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             depthImage, depthImageMemory);
 
