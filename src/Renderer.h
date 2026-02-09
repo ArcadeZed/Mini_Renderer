@@ -15,6 +15,7 @@
 
 #include "vulkan/VulkanContext.h"
 #include "vulkan/VulkanSwapchain.h"
+#include "vulkan/VulkanCommand.h"
 
 // Vertex-Struktur für unser Dreieck
 struct Vertex {
@@ -98,7 +99,6 @@ private:
     VkFormat findDepthFormat();
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
     bool hasStencilComponent(VkFormat format);
-    void createCommandPool();
     void createVertexBuffer();
     void createIndexBuffer();
     void createCommandBuffers();
@@ -130,9 +130,6 @@ private:
     void createTextureImageView();
     void createTextureSampler();
     void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
-    VkCommandBuffer beginSingleTimeCommands();
-    void endSingleTimeCommands(VkCommandBuffer commandBuffer);
-
 
     // Helper functions
     void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling,
@@ -175,6 +172,9 @@ private:
     // Vulkan Swapchain (Presentation images & image views)
     VulkanSwapchain swapchain;
 
+    // Vulkan Command (Command pool & allocation)
+    VulkanCommand command;
+
     std::vector<VkFramebuffer> swapchainFramebuffers;
 
     VkRenderPass renderPass;
@@ -194,7 +194,6 @@ private:
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
 
-    VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
 
     VkBuffer vertexBuffer;

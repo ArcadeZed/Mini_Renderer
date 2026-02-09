@@ -46,6 +46,8 @@ add_executable(MiniRenderer
         src/vulkan/VulkanContext.h
         src/vulkan/VulkanSwapchain.cpp
         src/vulkan/VulkanSwapchain.h
+        src/vulkan/VulkanCommand.cpp
+        src/vulkan/VulkanCommand.h
 )
 
 add_dependencies(MiniRenderer Shaders)

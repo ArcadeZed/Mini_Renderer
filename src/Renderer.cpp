@@ -61,6 +61,9 @@ void Renderer::initVulkan() {
     // Initialize Swapchain (Presentation images & image views)
     swapchain.init(&context, window);
 
+    // Initialize Command Pool & Allocation
+    command.init(&context);
+
     createRenderPass();
     createDepthResources();  // Create depth buffer (BEFORE framebuffers!)
     createDescriptorSetLayout();
@@ -68,7 +71,6 @@ void Renderer::initVulkan() {
     createDebugPipeline();  // Create separate unlit pipeline for debug geometry
     createInfiniteGridPipeline();  // Create infinite grid pipeline
     createFramebuffers();
-    createCommandPool();
     createDebugBuffers();  // Create fixed debug buffers (Grid + Axes)
     createVertexBuffer();  // Erstelle den Vertex Buffer
     createIndexBuffer();   // Erstelle den Index Buffer
@@ -788,19 +790,6 @@ void Renderer::createFramebuffers() {
     std::cout << "Framebuffers created (with depth attachment)." << std::endl;
 }
 
-void Renderer::createCommandPool() {
-    uint32_t graphicsFamily = context.getGraphicsQueueFamily();
-
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = graphicsFamily;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // Allow command buffers to be reset
-
-    if (vkCreateCommandPool(context.getDevice(), &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create command pool!");
-    }
-    std::cout << "Command pool created." << std::endl;
-}
 
 void Renderer::loadMeshFromFile(const std::string& filename) {
     meshFilePath = filename; // Store path for hot reloading
@@ -1030,7 +1019,7 @@ void Renderer::recreateBuffers() {
     vkFreeMemory(context.getDevice(), vertexBufferMemory, nullptr);
 
     // Free old command buffers
-    vkFreeCommandBuffers(context.getDevice(), commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+    vkFreeCommandBuffers(context.getDevice(), command.getCommandPool(), static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
 
     // Create new USER buffers with updated data (debug buffers stay unchanged)
     createVertexBuffer();
@@ -1079,36 +1068,13 @@ void Renderer::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemor
 }
 
 void Renderer::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(context.getDevice(), &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    VkCommandBuffer commandBuffer = command.beginSingleTimeCommands();
 
     VkBufferCopy copyRegion{};
     copyRegion.size = size;
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(context.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(context.getGraphicsQueue());
-
-    vkFreeCommandBuffers(context.getDevice(), commandPool, 1, &commandBuffer);
+    command.endSingleTimeCommands(commandBuffer);
 }
 
 void Renderer::createVertexBuffer() {
@@ -1153,17 +1119,8 @@ void Renderer::createIndexBuffer() {
 
 
 void Renderer::createCommandBuffers() {
-    commandBuffers.resize(swapchainFramebuffers.size());
-
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
-
-    if (vkAllocateCommandBuffers(context.getDevice(), &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
-        throw std::runtime_error("failed to allocate command buffers!");
-    }
+    // Allocate command buffers from command pool
+    command.allocateCommandBuffers(commandBuffers, static_cast<uint32_t>(swapchainFramebuffers.size()));
 
     for (size_t i = 0; i < commandBuffers.size(); i++) {
         VkCommandBufferBeginInfo beginInfo{};
@@ -1349,38 +1306,6 @@ void Renderer::drawFrame() {
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
-VkCommandBuffer Renderer::beginSingleTimeCommands() {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(context.getDevice(), &allocInfo, &commandBuffer);
-
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-    return commandBuffer;
-}
-
-void Renderer::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
-    vkEndCommandBuffer(commandBuffer);
-
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    vkQueueSubmit(context.getGraphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(context.getGraphicsQueue());
-
-    vkFreeCommandBuffers(context.getDevice(), commandPool, 1, &commandBuffer);
-}
 
 void Renderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling,
                           VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
@@ -1420,7 +1345,7 @@ void Renderer::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, 
 }
 
 void Renderer::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    VkCommandBuffer commandBuffer = command.beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1454,11 +1379,11 @@ void Renderer::transitionImageLayout(VkImage image, VkFormat format, VkImageLayo
 
     vkCmdPipelineBarrier(commandBuffer, sourceStage, destinationStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    endSingleTimeCommands(commandBuffer);
+    command.endSingleTimeCommands(commandBuffer);
 }
 
 void Renderer::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    VkCommandBuffer commandBuffer = command.beginSingleTimeCommands();
 
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
@@ -1473,7 +1398,7 @@ void Renderer::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width,
 
     vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    endSingleTimeCommands(commandBuffer);
+    command.endSingleTimeCommands(commandBuffer);
 }
 
 VkImageView Renderer::createImageView(VkImage image, VkFormat format, uint32_t mipLevels) {
@@ -1592,7 +1517,7 @@ void Renderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texW
         throw std::runtime_error("texture image format does not support linear blitting!");
     }
 
-    VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+    VkCommandBuffer commandBuffer = command.beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1671,7 +1596,7 @@ void Renderer::generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texW
         0, nullptr,
         1, &barrier);
 
-    endSingleTimeCommands(commandBuffer);
+    command.endSingleTimeCommands(commandBuffer);
 
     std::cout << "Generated " << mipLevels << " mipmap levels" << std::endl;
 }
@@ -1685,7 +1610,8 @@ void Renderer::cleanup() {
         vkDestroyFence(context.getDevice(), inFlightFences[i], nullptr);
     }
 
-    vkDestroyCommandPool(context.getDevice(), commandPool, nullptr);
+    // Cleanup Command Pool (also frees all command buffers) - BEFORE other resources!
+    command.cleanup();
 
     vkDestroyBuffer(context.getDevice(), indexBuffer, nullptr);
     vkFreeMemory(context.getDevice(), indexBufferMemory, nullptr);
