@@ -114,6 +114,9 @@ static bool loadOBJWithMaterials(const std::string& filepath,
     outSubMeshes.clear();
     outMaterials.clear();
 
+    std::unordered_map<VertexKey, uint32_t> uniqueVertices;
+    uniqueVertices.reserve(attrib.vertices.size() / 3);
+
     // Load materials from .mtl file
     std::string baseDir = filepath.substr(0, filepath.find_last_of("/\\"));
     for (const auto& mat : materials) {
@@ -195,8 +198,22 @@ static bool loadOBJWithMaterials(const std::string& filepath,
 
                 vertex.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
-                outVertices.push_back(vertex);
-                outIndices.push_back(static_cast<uint32_t>(outVertices.size() - 1));
+                VertexKey key {
+                    q3(vertex.pos, POS_SCALE),
+                    q3(vertex.normal, NORMAL_SCALE),
+                    q2(vertex.uv, UV_SCALE),
+                    q3(vertex.color, COLOR_SCALE)
+                };
+
+                auto it = uniqueVertices.find(key);
+                if (it == uniqueVertices.end()) {
+                    uint32_t index = static_cast<uint32_t>(outVertices.size());
+                    uniqueVertices[key] = index;
+                    outVertices.push_back(vertex);
+                    outIndices.push_back(index);
+                } else {
+                    outIndices.push_back(it->second);
+                }
             }
 
             indexOffset += fv;

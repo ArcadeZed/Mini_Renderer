@@ -4,6 +4,66 @@
 #include <string>
 #include <ctime>
 #include "../material/Material.h"
+#include <unordered_map>
+#include <functional>
+
+struct VertexKey {
+    glm::ivec3 pos;
+    glm::ivec3 normal;
+    glm::ivec2 uv;
+    glm::ivec3 color;
+
+    bool operator==(const VertexKey& other) const {
+        return pos == other.pos &&
+               normal == other.normal &&
+               uv == other.uv &&
+               color == other.color;
+    }
+};
+
+constexpr float POS_SCALE    = 10000.0f;
+constexpr float NORMAL_SCALE = 32767.0f;
+constexpr float UV_SCALE     = 10000.0f;
+constexpr float COLOR_SCALE  = 255.0f;
+
+inline glm::ivec3 q3(const glm::vec3& v, float s) {
+    return glm::ivec3(glm::round(v * s));
+}
+
+inline glm::ivec2 q2(const glm::vec2& v, float s) {
+    return glm::ivec2(glm::round(v * s));
+}
+
+inline void hash_combine(std::size_t& seed, std::size_t value) {
+    seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+namespace std {
+    template<>
+    struct hash<VertexKey> {
+        size_t operator()(const VertexKey& k) const {
+            size_t seed = 0;
+            auto h = std::hash<int>{};
+
+            hash_combine(seed, h(k.pos.x));
+            hash_combine(seed, h(k.pos.y));
+            hash_combine(seed, h(k.pos.z));
+
+            hash_combine(seed, h(k.normal.x));
+            hash_combine(seed, h(k.normal.y));
+            hash_combine(seed, h(k.normal.z));
+
+            hash_combine(seed, h(k.uv.x));
+            hash_combine(seed, h(k.uv.y));
+
+            hash_combine(seed, h(k.color.x));
+            hash_combine(seed, h(k.color.y));
+            hash_combine(seed, h(k.color.z));
+
+            return seed;
+        }
+    };
+}
 
 // Static utility for loading mesh data from files.
 // Supports:
