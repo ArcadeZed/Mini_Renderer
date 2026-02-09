@@ -13,14 +13,7 @@
 #include <ctime>  // Für std::time_t
 #include <glm/gtc/matrix_transform.hpp>
 
-struct QueueFamilyIndices {
-    std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentFamily;
-
-    bool isComplete() {
-        return graphicsFamily.has_value() && presentFamily.has_value();
-    }
-};
+#include "vulkan/VulkanContext.h"
 
 // Struktur zur Speicherung der Swapchain-Unterstützungsdetails
 struct SwapchainSupportDetails {
@@ -102,11 +95,6 @@ public:
 
 private:
     void initVulkan();
-    void createInstance();
-    void setupDebugMessenger();
-    void createWindowSurface();
-    void pickPhysicalDevice();
-    void createLogicalDevice();
     void createSwapchain();
     void createImageViews();
     void createRenderPass();
@@ -163,9 +151,6 @@ private:
     VkImageView createImageView(VkImage image, VkFormat format, uint32_t mipLevels = 1);
 
     // Helper Functions
-    bool isDeviceSuitable(VkPhysicalDevice device);
-    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
-    bool checkDeviceExtensionSupport(VkPhysicalDevice device);
     SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice device);
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
     VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
@@ -196,15 +181,8 @@ private:
     // Member-Vars
     GLFWwindow* window;
 
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT debugMessenger; // Für Debugging-Meldungen
-    VkSurfaceKHR surface;
-
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device;
-
-    VkQueue graphicsQueue;
-    VkQueue presentQueue;
+    // Vulkan Core (Instance, Device, Queues, Surface)
+    VulkanContext context;
 
     VkSwapchainKHR swapchain;
     std::vector<VkImage> swapchainImages;
