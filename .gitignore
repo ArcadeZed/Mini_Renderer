@@ -71,3 +71,22 @@ external/glfw/bin/
 external/glfw/lib/
 external/glfw/CMakeFiles/
 external/glfw/CMakeCache.txt
+
+# ==============================================================================
+# USER CONTENT (Not part of codebase)
+# ==============================================================================
+
+# User-created test models (hot-reloadable during development)
+models/*
+!models/example.txt
+!models/README.md
+
+# User textures (may vary per developer)
+textures/*
+!textures/checkerboard.png
+!textures/README.md
+
+# Temporary/Debug files
+nul
+*.log
+*.tmp

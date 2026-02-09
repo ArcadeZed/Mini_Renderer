@@ -1,0 +1,15 @@
+# Simple colored triangle for demonstration
+# Format: Position(x,y,z) Color(r,g,b) Normal(x,y,z) UV(u,v)
+
+VERTICES
+# Red vertex (bottom-left)
+-1.0 -1.0 0.0  1.0 0.0 0.0  0.0 0.0 1.0  0.0 0.0
+
+# Green vertex (bottom-right)
+1.0 -1.0 0.0  0.0 1.0 0.0  0.0 0.0 1.0  1.0 0.0
+
+# Blue vertex (top-center)
+0.0 1.0 0.0  0.0 0.0 1.0  0.0 0.0 1.0  0.5 1.0
+
+INDICES
+0 1 2

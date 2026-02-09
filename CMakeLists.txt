@@ -4,6 +4,9 @@ project(MiniRenderer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Option für Vulkan Validation Layers
+option(ENABLE_VALIDATION_LAYERS "Enable Vulkan Validation Layers (disable if OBS/Overwolf conflict)" OFF)
+
 # Vulkan SDK
 find_package(Vulkan REQUIRED)
 
@@ -15,6 +18,9 @@ add_subdirectory(external/glfw)
 
 # Shader automatisch kompilieren (optional, falls glslc verfügbar)
 file(GLOB SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.frag")
+
+# Create shader output directory
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shaders")
 
 set(COMPILED_SHADERS "")
 foreach(SHADER ${SHADER_SOURCES})
@@ -54,3 +60,11 @@ target_include_directories(MiniRenderer PRIVATE
 target_compile_definitions(MiniRenderer PRIVATE
         SHADER_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/shaders\"
 )
+
+# Validation Layers aktivieren, falls Option gesetzt
+if(ENABLE_VALIDATION_LAYERS)
+    target_compile_definitions(MiniRenderer PRIVATE FORCE_ENABLE_VALIDATION_LAYERS)
+    message(STATUS "Vulkan Validation Layers: ENABLED")
+else()
+    message(STATUS "Vulkan Validation Layers: DISABLED (use -DENABLE_VALIDATION_LAYERS=ON to enable)")
+endif()

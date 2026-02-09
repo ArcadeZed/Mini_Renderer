@@ -27,11 +27,20 @@ int main() {
     try {
         renderer.init(window); // Fenster an Renderer übergeben
         std::cout << "Renderer initialized." << std::endl;
+        std::cout << "🔥 Hot reloading enabled! Edit models/triangle.txt and see changes live!" << std::endl;
 
         // Main loop
+        int frameCount = 0;
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents(); // GLFW-Events verarbeiten (z.B. Fensterschließen)
+
+            // Check for mesh file changes every 30 frames (~0.5 seconds at 60 FPS)
+            if (frameCount % 30 == 0) {
+                renderer.checkAndReloadMesh();
+            }
+
             renderer.drawFrame();
+            frameCount++;
         }
 
         renderer.cleanup();
