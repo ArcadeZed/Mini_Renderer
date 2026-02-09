@@ -16,6 +16,7 @@
 #include "vulkan/VulkanContext.h"
 #include "vulkan/VulkanSwapchain.h"
 #include "vulkan/VulkanCommand.h"
+#include "vulkan/VulkanResource.h"
 
 // Vertex-Struktur für unser Dreieck
 struct Vertex {
@@ -131,18 +132,8 @@ private:
     void createTextureSampler();
     void generateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
 
-    // Helper functions
-    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling,
-                VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
-                VkImage& image, VkDeviceMemory& imageMemory);
-    void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
-    void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-    VkImageView createImageView(VkImage image, VkFormat format, uint32_t mipLevels = 1);
-
     // Helper Functions
     VkShaderModule createShaderModule(const std::vector<char>& code);
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
     void loadMeshFromFile(const std::string& filename);
     void recreateBuffers();
@@ -174,6 +165,9 @@ private:
 
     // Vulkan Command (Command pool & allocation)
     VulkanCommand command;
+
+    // Vulkan Resource (Buffer & Image management)
+    VulkanResource resource;
 
     std::vector<VkFramebuffer> swapchainFramebuffers;
 
