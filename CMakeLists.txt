@@ -16,7 +16,23 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/glfw)
 
-# Shader automatisch kompilieren (optional, falls glslc verfügbar)
+# ImGui static library
+set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/imgui)
+add_library(imgui STATIC
+        ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp
+        ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+)
+target_include_directories(imgui PUBLIC
+        ${IMGUI_DIR}
+        ${IMGUI_DIR}/backends
+)
+target_link_libraries(imgui PUBLIC Vulkan::Vulkan glfw)
+
+# Shader automatisch kompilieren
 file(GLOB SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.frag")
 
 # Create shader output directory
@@ -40,16 +56,36 @@ add_custom_target(Shaders ALL DEPENDS ${COMPILED_SHADERS})
 # Projekt
 add_executable(MiniRenderer
         src/main.cpp
-        src/Renderer.cpp
-        src/Renderer.h
-        src/vulkan/VulkanContext.cpp
-        src/vulkan/VulkanContext.h
-        src/vulkan/VulkanSwapchain.cpp
-        src/vulkan/VulkanSwapchain.h
-        src/vulkan/VulkanCommand.cpp
-        src/vulkan/VulkanCommand.h
-        src/vulkan/VulkanResource.cpp
-        src/vulkan/VulkanResource.h
+        src/rendering/RenderEngine.cpp
+        src/rendering/RenderEngine.h
+        src/rendering/ForwardPass.cpp
+        src/rendering/ForwardPass.h
+        src/debug/DebugRenderer.cpp
+        src/debug/DebugRenderer.h
+        src/debug/ImGuiOverlay.cpp
+        src/debug/ImGuiOverlay.h
+        src/core/VulkanContext.cpp
+        src/core/VulkanContext.h
+        src/core/VulkanSwapchain.cpp
+        src/core/VulkanSwapchain.h
+        src/core/VulkanCommand.cpp
+        src/core/VulkanCommand.h
+        src/core/VulkanResource.cpp
+        src/core/VulkanResource.h
+        src/core/ShaderManager.cpp
+        src/core/ShaderManager.h
+        src/core/PipelineBuilder.cpp
+        src/core/PipelineBuilder.h
+        src/core/DescriptorManager.cpp
+        src/core/DescriptorManager.h
+        src/mesh/Mesh.cpp
+        src/mesh/Mesh.h
+        src/mesh/MeshLoader.cpp
+        src/mesh/MeshLoader.h
+        src/scene/Camera.h
+        src/scene/Transform.h
+        src/scene/SceneObject.h
+        src/scene/Scene.h
 )
 
 add_dependencies(MiniRenderer Shaders)
@@ -57,6 +93,7 @@ add_dependencies(MiniRenderer Shaders)
 target_link_libraries(MiniRenderer
         Vulkan::Vulkan
         glfw
+        imgui
 )
 
 target_include_directories(MiniRenderer PRIVATE
