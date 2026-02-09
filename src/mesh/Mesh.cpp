@@ -4,9 +4,21 @@
 #include <cstring>
 #include <iostream>
 
-void Mesh::setGeometry(std::vector<Vertex> verts, std::vector<uint16_t> inds) {
+void Mesh::setGeometry(std::vector<Vertex> verts, std::vector<uint32_t> inds) {
     vertices = std::move(verts);
     indices = std::move(inds);
+    subMeshes.clear();  // Single-material mesh doesn't use submeshes
+    materials.clear();
+}
+
+void Mesh::setGeometryWithMaterials(std::vector<Vertex> verts,
+                                     std::vector<uint32_t> inds,
+                                     std::vector<SubMesh> submeshes,
+                                     std::vector<Material> mats) {
+    vertices = std::move(verts);
+    indices = std::move(inds);
+    subMeshes = std::move(submeshes);
+    materials = std::move(mats);
 }
 
 void Mesh::uploadBuffer(VkDevice device, VulkanResource& resource, VulkanCommand& command,
@@ -42,7 +54,7 @@ void Mesh::upload(VkDevice device, VulkanResource& resource, VulkanCommand& comm
                  VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, vertexBuffer, vertexBufferMemory);
 
     uploadBuffer(device, resource, command,
-                 indices.data(), sizeof(uint16_t) * indices.size(),
+                 indices.data(), sizeof(uint32_t) * indices.size(),
                  VK_BUFFER_USAGE_INDEX_BUFFER_BIT, indexBuffer, indexBufferMemory);
 }
 
@@ -50,11 +62,20 @@ void Mesh::bind(VkCommandBuffer cmd) const {
     VkBuffer buffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, buffers, offsets);
-    vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(cmd, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 }
 
 void Mesh::draw(VkCommandBuffer cmd) const {
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+}
+
+void Mesh::drawSubmesh(VkCommandBuffer cmd, uint32_t submeshIndex) const {
+    if (submeshIndex >= subMeshes.size()) {
+        std::cerr << "Invalid submesh index: " << submeshIndex << std::endl;
+        return;
+    }
+    const SubMesh& submesh = subMeshes[submeshIndex];
+    vkCmdDrawIndexed(cmd, submesh.indexCount, 1, submesh.firstIndex, 0, 0);
 }
 
 void Mesh::cleanup(VkDevice device) {

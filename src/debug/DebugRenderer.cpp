@@ -13,6 +13,13 @@ void DebugRenderer::init(VkDevice device,
                          VkRenderPass renderPass,
                          VulkanResource& resource,
                          VulkanCommand& command) {
+    // Cache parameters for later pipeline rebuilds
+    this->device = device;
+    this->shaderManager = &shaderManager;
+    this->swapchainExtent = swapchainExtent;
+    this->descriptorSetLayout = descriptorSetLayout;
+    this->renderPass = renderPass;
+
     buildDebugGeometry();
     debugMesh.upload(device, resource, command);
 
@@ -24,9 +31,9 @@ void DebugRenderer::init(VkDevice device,
 
 void DebugRenderer::buildDebugGeometry() {
     std::vector<Vertex> verts;
-    std::vector<uint16_t> inds;
+    std::vector<uint32_t> inds;
 
-    uint16_t indexOffset = 0;
+    uint32_t indexOffset = 0;
 
     // ========== AXES (LONG - extend far into distance) ==========
     const float axisLength = 1000.0f;
@@ -37,7 +44,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{ axisLength, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{ axisLength, axisThickness, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{-axisLength, axisThickness, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
     indexOffset += 4;
 
     // Y-Axis (Green) - from 0 to +1000 (only positive, ground is at y=0)
@@ -45,7 +52,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{axisThickness, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{axisThickness, axisLength, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{0.0f, axisLength, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
     indexOffset += 4;
 
     // Z-Axis (Blue) - from -1000 to +1000
@@ -53,7 +60,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{axisThickness, 0.0f, -axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{axisThickness, 0.0f, axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{0.0f, 0.0f, axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
     indexOffset += 4;
 
     // ========== GRID LINES (Gray) - XZ plane at Y=0 ==========
@@ -62,7 +69,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{ 1.0f, 0.0f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{ 1.0f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{-1.0f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
     indexOffset += 4;
 
     // Line along X at Z=1
@@ -70,7 +77,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{ 1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{ 1.0f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{-1.0f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
     indexOffset += 4;
 
     // Line along Z at X=-1
@@ -78,7 +85,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{-1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{-0.99f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{-0.99f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
     indexOffset += 4;
 
     // Line along Z at X=1
@@ -86,7 +93,7 @@ void DebugRenderer::buildDebugGeometry() {
     verts.push_back({{1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
     verts.push_back({{1.01f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
     verts.push_back({{1.01f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint16_t>(indexOffset+0), static_cast<uint16_t>(indexOffset+1), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+2), static_cast<uint16_t>(indexOffset+3), static_cast<uint16_t>(indexOffset+0)});
+    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
 
     debugMesh.setGeometry(std::move(verts), std::move(inds));
     std::cout << "DebugRenderer: Debug geometry built." << std::endl;
@@ -175,4 +182,27 @@ void DebugRenderer::cleanup(VkDevice device) {
         vkDestroyPipelineLayout(device, gridPipelineLayout, nullptr);
         gridPipelineLayout = VK_NULL_HANDLE;
     }
+}
+
+void DebugRenderer::updateExtent(VkExtent2D newExtent) {
+    swapchainExtent = newExtent;
+
+    // Rebuild both pipelines with new extent
+    if (debugPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, debugPipeline, nullptr);
+        vkDestroyPipelineLayout(device, debugPipelineLayout, nullptr);
+        debugPipeline = VK_NULL_HANDLE;
+        debugPipelineLayout = VK_NULL_HANDLE;
+    }
+    if (gridPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, gridPipeline, nullptr);
+        vkDestroyPipelineLayout(device, gridPipelineLayout, nullptr);
+        gridPipeline = VK_NULL_HANDLE;
+        gridPipelineLayout = VK_NULL_HANDLE;
+    }
+
+    createDebugPipeline(device, *shaderManager, swapchainExtent,
+                        descriptorSetLayout, renderPass);
+    createGridPipeline(device, *shaderManager, swapchainExtent,
+                       descriptorSetLayout, renderPass);
 }

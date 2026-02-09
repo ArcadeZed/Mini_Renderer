@@ -1,9 +1,11 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vector>
 
 class ShaderManager;
 class Scene;
+class ILightingModel;
 
 class ForwardPass {
 public:
@@ -20,12 +22,29 @@ public:
               VkRenderPass renderPass);
 
     void record(VkCommandBuffer cmd,
-                VkDescriptorSet descriptorSet,
-                const Scene& scene);
+                VkDescriptorSet globalDescriptorSet,
+                const Scene& scene,
+                const std::vector<VkDescriptorSet>& materialDescriptorSets = {});
 
     void cleanup(VkDevice device);
 
+    // Set the lighting model and rebuild the pipeline
+    void setLightingModel(ILightingModel* model);
+
+    // Update swapchain extent and rebuild pipeline (for window resize)
+    void updateExtent(VkExtent2D newExtent);
+
 private:
+    void buildPipeline();
+
+    VkDevice device = VK_NULL_HANDLE;
+    ShaderManager* shaderManager = nullptr;
+    VkExtent2D swapchainExtent{};
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
+
+    ILightingModel* currentModel = nullptr;
+
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
 };

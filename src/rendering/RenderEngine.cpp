@@ -4,6 +4,9 @@
 #include "../core/DescriptorManager.h"
 #include "../mesh/MeshLoader.h"
 #include "ForwardPass.h"
+#include "PhongLighting.h"
+#include "BlinnPhongLighting.h"
+#include "PBRLighting.h"
 #include "../debug/DebugRenderer.h"
 #include "../debug/ImGuiOverlay.h"
 #include <stdexcept>
@@ -27,28 +30,52 @@
 RenderEngine::RenderEngine() {}
 RenderEngine::~RenderEngine() {}
 
-void RenderEngine::init(GLFWwindow* glfwWindow) {
+void RenderEngine::init(GLFWwindow* glfwWindow,
+                        const std::string& meshPath,
+                        const std::string& texturePath) {
     window = glfwWindow;
+    meshFilePath = meshPath;
+    textureFilePath = texturePath;
     initVulkan();
 }
 
 void RenderEngine::initVulkan() {
-    // Load mesh data from file (CPU-side, before Vulkan init)
-    std::string resolvedPath = MeshLoader::resolvePath("../models/triangle.txt");
-    if (resolvedPath.empty()) {
-        throw std::runtime_error("Could not find mesh file: ../models/triangle.txt");
-    }
-    meshFilePath = resolvedPath;
+    // Load mesh data from file (CPU-side, before Vulkan init) - OPTIONAL
+    if (!meshFilePath.empty()) {
+        std::string resolvedPath = MeshLoader::resolvePath(meshFilePath);
+        if (resolvedPath.empty()) {
+            throw std::runtime_error("Could not find mesh file: " + meshFilePath);
+        }
+        meshFilePath = resolvedPath;
 
-    SceneObject userObject;
-    std::vector<Vertex> verts;
-    std::vector<uint16_t> inds;
-    if (!MeshLoader::loadFromFile(meshFilePath, verts, inds)) {
-        throw std::runtime_error("Failed to load mesh file: " + meshFilePath);
+        SceneObject userObject;
+        std::vector<Vertex> verts;
+        std::vector<uint32_t> inds;
+        std::vector<SubMesh> submeshes;
+        std::vector<Material> materials;
+
+        // Try loading with materials first (.obj files)
+        if (!MeshLoader::loadFromFileWithMaterials(meshFilePath, verts, inds, submeshes, materials)) {
+            throw std::runtime_error("Failed to load mesh file: " + meshFilePath);
+        }
+
+        // Set geometry with materials if available
+        if (!submeshes.empty()) {
+            userObject.mesh.setGeometryWithMaterials(std::move(verts), std::move(inds),
+                                                       std::move(submeshes), std::move(materials));
+            useMultiMaterial = true;
+            std::cout << "Loaded mesh with " << userObject.mesh.getMaterials().size() << " materials" << std::endl;
+        } else {
+            userObject.mesh.setGeometry(std::move(verts), std::move(inds));
+            useMultiMaterial = false;
+            std::cout << "Loaded single-material mesh" << std::endl;
+        }
+
+        lastFileModTime = MeshLoader::getModTime(meshFilePath);
+        scene.objects.push_back(std::move(userObject));
+    } else {
+        std::cout << "RenderEngine starting without mesh (use Drag & Drop to load)" << std::endl;
     }
-    userObject.mesh.setGeometry(std::move(verts), std::move(inds));
-    lastFileModTime = MeshLoader::getModTime(meshFilePath);
-    scene.objects.push_back(std::move(userObject));
 
     // Initialize Vulkan Core (Instance, Device, Queues, Surface)
     context.init(window, enableValidationLayers);
@@ -68,16 +95,29 @@ void RenderEngine::initVulkan() {
     createDescriptorSetLayout();
     createFramebuffers();
 
-    // Upload scene mesh to GPU
-    scene.objects[0].mesh.upload(context.getDevice(), resource, command);
+    // Upload scene mesh to GPU (if loaded)
+    if (!scene.objects.empty()) {
+        scene.objects[0].mesh.upload(context.getDevice(), resource, command);
+    }
 
     // Create uniform buffers, textures, descriptors
     createUniformBuffers();
-    createTextureImage();
+    createTextureImage();  // Legacy default texture
     createTextureImageView();
     createTextureSampler();
+
+    // Load material textures if multi-material mesh
+    if (useMultiMaterial && !scene.objects.empty()) {
+        loadMaterialTextures();
+    }
+
     createDescriptorPool();
     createDescriptorSets();
+
+    // Create material descriptor sets after pool creation
+    if (useMultiMaterial && !scene.objects.empty()) {
+        createMaterialDescriptorSets();
+    }
 
     // Initialize render sub-systems (AFTER render pass + descriptor layout exist)
     forwardPass = std::make_unique<ForwardPass>();
@@ -198,10 +238,14 @@ void RenderEngine::createUniformBuffers() {
 }
 
 void RenderEngine::createDescriptorPool() {
+    // Increased pool size to support multi-material meshes (up to 50 materials)
+    const uint32_t MAX_MATERIAL_SETS = 50;
+    const uint32_t TOTAL_SETS = MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS;
+
     descriptorManager->createPool({
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT)}
-    }, static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, TOTAL_SETS},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, TOTAL_SETS}
+    }, TOTAL_SETS);
 }
 
 void RenderEngine::createDescriptorSets() {
@@ -220,11 +264,19 @@ void RenderEngine::createDescriptorSets() {
 void RenderEngine::updateUniformBuffer(uint32_t currentImage) {
     UniformBufferObject ubo{};
 
-    ubo.model = scene.objects[0].transform.getModelMatrix();
+    // Use model matrix from first object if scene is not empty, otherwise identity
+    if (!scene.objects.empty()) {
+        ubo.model = scene.objects[0].transform.getModelMatrix();
+    } else {
+        ubo.model = glm::mat4(1.0f);  // Identity matrix
+    }
 
+    // Update camera aspect ratio based on current swapchain extent
     float aspect = swapchain.getExtent().width / (float)swapchain.getExtent().height;
+    scene.camera.setAspectRatio(aspect);
+
     ubo.view = scene.camera.getViewMatrix();
-    ubo.proj = scene.camera.getProjectionMatrix(aspect);
+    ubo.proj = scene.camera.getProjectionMatrix();
     ubo.viewPos = scene.camera.getPosition();
 
     // Read from ImGui interactive params
@@ -236,6 +288,8 @@ void RenderEngine::updateUniformBuffer(uint32_t currentImage) {
     ubo.attenuationConstant = imguiParams.attenuationConstant;
     ubo.attenuationLinear = imguiParams.attenuationLinear;
     ubo.attenuationQuadratic = imguiParams.attenuationQuadratic;
+    ubo.metalness = imguiParams.metalness;
+    ubo.roughness = imguiParams.roughness;
 
     void* data;
     vkMapMemory(context.getDevice(), uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -315,15 +369,28 @@ bool RenderEngine::hasStencilComponent(VkFormat format) {
 
 void RenderEngine::createTextureImage() {
     int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load("textures/test_texture.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    VkDeviceSize imageSize = texWidth * texHeight * 4;
+    stbi_uc* pixels = nullptr;
+    bool isDummyTexture = false;
 
-    if (!pixels) {
-        throw std::runtime_error("failed to load texture image!");
+    // Try loading texture from file if path is provided
+    if (!textureFilePath.empty()) {
+        pixels = stbi_load(textureFilePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        if (pixels) {
+            std::cout << "Texture loaded: " << texWidth << "x" << texHeight
+                      << " channels: " << texChannels << std::endl;
+        }
     }
 
-    std::cout << "Texture loaded: " << texWidth << "x" << texHeight
-              << " channels: " << texChannels << std::endl;
+    // Create 1x1 white dummy texture if no file or load failed
+    if (!pixels) {
+        texWidth = texHeight = 1;
+        texChannels = 4;
+        pixels = new stbi_uc[4]{255, 255, 255, 255};  // White pixel
+        isDummyTexture = true;
+        std::cout << "Using default 1x1 white texture (no texture file provided)" << std::endl;
+    }
+
+    VkDeviceSize imageSize = texWidth * texHeight * 4;
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -336,7 +403,12 @@ void RenderEngine::createTextureImage() {
     memcpy(data, pixels, static_cast<size_t>(imageSize));
     vkUnmapMemory(context.getDevice(), stagingBufferMemory);
 
-    stbi_image_free(pixels);
+    // Free pixel data (different for stbi vs dummy)
+    if (isDummyTexture) {
+        delete[] pixels;
+    } else {
+        stbi_image_free(pixels);
+    }
 
     mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
@@ -527,7 +599,15 @@ void RenderEngine::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     // 1. Scene objects (Phong + texture)
-    forwardPass->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT], scene);
+    // Build material descriptor sets vector for multi-material meshes
+    std::vector<VkDescriptorSet> matDescSets;
+    if (useMultiMaterial) {
+        matDescSets.reserve(materialResources.size());
+        for (const auto& matRes : materialResources) {
+            matDescSets.push_back(matRes.descriptorSet);
+        }
+    }
+    forwardPass->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT], scene, matDescSets);
 
     // 2. Debug visualization (grid + axes) - conditional on ImGui toggles
     debugRenderer->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT],
@@ -551,8 +631,16 @@ void RenderEngine::drawFrame() {
     vkWaitForFences(context.getDevice(), 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
     uint32_t imageIndex;
-    vkAcquireNextImageKHR(context.getDevice(), swapchain.getSwapchain(), UINT64_MAX,
+    VkResult result = vkAcquireNextImageKHR(context.getDevice(), swapchain.getSwapchain(), UINT64_MAX,
                           imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        // Swapchain is out of date (e.g. window resized) - recreate it
+        recreateSwapchain();
+        return;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        throw std::runtime_error("failed to acquire swapchain image!");
+    }
 
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
         vkWaitForFences(context.getDevice(), 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
@@ -564,6 +652,22 @@ void RenderEngine::drawFrame() {
     // ImGui frame
     imguiOverlay->beginFrame();
     imguiOverlay->buildUI(imguiParams);
+
+    // Check if lighting model changed and rebuild pipeline if needed
+    if (imguiParams.lightingModelIndex != previousLightingModelIndex) {
+        // Wait for device to be idle before rebuilding pipeline
+        vkDeviceWaitIdle(context.getDevice());
+
+        static PhongLighting phong;
+        static BlinnPhongLighting blinnPhong;
+        static PBRLighting pbr;
+
+        ILightingModel* models[] = { &phong, &blinnPhong, &pbr };
+        int index = std::clamp(imguiParams.lightingModelIndex, 0, 2);
+        forwardPass->setLightingModel(models[index]);
+
+        previousLightingModelIndex = imguiParams.lightingModelIndex;
+    }
 
     // Per-frame command buffer recording
     recordCommandBuffer(commandBuffers[imageIndex], imageIndex);
@@ -600,7 +704,16 @@ void RenderEngine::drawFrame() {
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(context.getPresentQueue(), &presentInfo);
+    result = vkQueuePresentKHR(context.getPresentQueue(), &presentInfo);
+
+    // Check if swapchain needs recreation (window resized or suboptimal)
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+        framebufferResized = false;  // Reset flag
+        recreateSwapchain();
+    } else if (result != VK_SUCCESS) {
+        throw std::runtime_error("failed to present swapchain image!");
+    }
+
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
@@ -616,7 +729,7 @@ void RenderEngine::checkAndReloadMesh() {
 
     try {
         std::vector<Vertex> verts;
-        std::vector<uint16_t> inds;
+        std::vector<uint32_t> inds;
         if (!MeshLoader::loadFromFile(meshFilePath, verts, inds)) {
             std::cerr << "Failed to reload mesh file." << std::endl;
             return;
@@ -665,6 +778,9 @@ void RenderEngine::cleanup() {
     // Scene mesh GPU buffers
     scene.cleanup(context.getDevice());
 
+    // Material textures cleanup (if multi-material)
+    cleanupMaterialResources();
+
     // Texture cleanup
     vkDestroySampler(context.getDevice(), textureSampler, nullptr);
     vkDestroyImageView(context.getDevice(), textureImageView, nullptr);
@@ -703,4 +819,343 @@ void RenderEngine::cleanup() {
     context.cleanup();
 
     std::cout << "RenderEngine cleaned up." << std::endl;
+}
+
+// ============================================================================
+// SWAPCHAIN RECREATION (for window resize)
+// ============================================================================
+
+void RenderEngine::recreateSwapchain() {
+    // Handle minimized window (width/height = 0)
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    while (width == 0 || height == 0) {
+        // Wait until window is restored
+        glfwGetFramebufferSize(window, &width, &height);
+        glfwWaitEvents();
+    }
+
+    // Wait for device to finish current operations
+    vkDeviceWaitIdle(context.getDevice());
+
+    // Cleanup old swapchain-dependent resources
+    for (auto framebuffer : swapchainFramebuffers) {
+        vkDestroyFramebuffer(context.getDevice(), framebuffer, nullptr);
+    }
+    swapchainFramebuffers.clear();
+
+    vkDestroyImageView(context.getDevice(), depthImageView, nullptr);
+    vkDestroyImage(context.getDevice(), depthImage, nullptr);
+    vkFreeMemory(context.getDevice(), depthImageMemory, nullptr);
+
+    swapchain.cleanup();
+
+    // Recreate swapchain and dependent resources
+    swapchain.init(&context, window);
+    createDepthResources();
+    createFramebuffers();
+
+    // Update pipelines with new extent (if they use fixed viewport/scissor)
+    forwardPass->updateExtent(swapchain.getExtent());
+    debugRenderer->updateExtent(swapchain.getExtent());
+
+    std::cout << "Swapchain recreated (new resolution: "
+              << swapchain.getExtent().width << "x" << swapchain.getExtent().height
+              << ")" << std::endl;
+}
+
+// ============================================================================
+// DYNAMIC LOADING (Runtime mesh/texture loading)
+// ============================================================================
+
+void RenderEngine::loadMesh(const std::string& filepath) {
+    std::cout << "Loading new mesh: " << filepath << std::endl;
+
+    // Wait for GPU to finish all work
+    vkDeviceWaitIdle(context.getDevice());
+
+    // Load new mesh data from file (with material support)
+    std::vector<Vertex> verts;
+    std::vector<uint32_t> inds;
+    std::vector<SubMesh> submeshes;
+    std::vector<Material> materials;
+
+    std::string resolvedPath = MeshLoader::resolvePath(filepath);
+    if (resolvedPath.empty()) {
+        std::cerr << "Could not find mesh file: " << filepath << std::endl;
+        return;
+    }
+
+    if (!MeshLoader::loadFromFileWithMaterials(resolvedPath, verts, inds, submeshes, materials)) {
+        std::cerr << "Failed to load mesh file: " << resolvedPath << std::endl;
+        return;
+    }
+
+    // Update mesh file path for hot-reload
+    meshFilePath = resolvedPath;
+    lastFileModTime = MeshLoader::getModTime(resolvedPath);
+
+    // Cleanup old resources
+    if (!scene.objects.empty()) {
+        scene.objects[0].mesh.cleanup(context.getDevice());
+    }
+    cleanupMaterialResources();  // Cleanup old material textures/descriptor sets
+
+    // Create new scene object if scene is empty
+    if (scene.objects.empty()) {
+        scene.objects.push_back(SceneObject{});
+    }
+
+    // Set new geometry
+    if (!submeshes.empty()) {
+        scene.objects[0].mesh.setGeometryWithMaterials(std::move(verts), std::move(inds),
+                                                        std::move(submeshes), std::move(materials));
+        useMultiMaterial = true;
+        std::cout << "Loaded mesh with " << scene.objects[0].mesh.getMaterials().size() << " materials" << std::endl;
+    } else {
+        scene.objects[0].mesh.setGeometry(std::move(verts), std::move(inds));
+        useMultiMaterial = false;
+        std::cout << "Loaded single-material mesh" << std::endl;
+    }
+
+    // Upload new mesh to GPU
+    scene.objects[0].mesh.upload(context.getDevice(), resource, command);
+
+    // Load material textures and create descriptor sets
+    if (useMultiMaterial) {
+        loadMaterialTextures();
+        createMaterialDescriptorSets();
+    }
+
+    std::cout << "Mesh loaded successfully: " << resolvedPath << std::endl;
+}
+
+void RenderEngine::loadTexture(const std::string& filepath) {
+    std::cout << "Loading new texture: " << filepath << std::endl;
+
+    // Wait for GPU to finish all work (this is sufficient!)
+    vkDeviceWaitIdle(context.getDevice());
+
+    // Cleanup old texture resources
+    vkDestroyImageView(context.getDevice(), textureImageView, nullptr);
+    vkDestroyImage(context.getDevice(), textureImage, nullptr);
+    vkFreeMemory(context.getDevice(), textureImageMemory, nullptr);
+
+    // Update texture file path
+    textureFilePath = filepath;
+
+    // Load new texture (same code as createTextureImage)
+    int texWidth, texHeight, texChannels;
+    stbi_uc* pixels = stbi_load(textureFilePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+    if (!pixels) {
+        std::cerr << "Failed to load texture image: " << textureFilePath << std::endl;
+        // Restore to default/previous texture on failure
+        return;
+    }
+
+    std::cout << "Texture loaded: " << texWidth << "x" << texHeight
+              << " channels: " << texChannels << std::endl;
+
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    resource.createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 stagingBuffer, stagingBufferMemory);
+
+    void* data;
+    vkMapMemory(context.getDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
+    memcpy(data, pixels, static_cast<size_t>(imageSize));
+    vkUnmapMemory(context.getDevice(), stagingBufferMemory);
+
+    stbi_image_free(pixels);
+
+    mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+
+    resource.createImage(texWidth, texHeight, mipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                textureImage, textureImageMemory);
+
+    resource.transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    resource.copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+
+    generateMipmaps(textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+
+    vkDestroyBuffer(context.getDevice(), stagingBuffer, nullptr);
+    vkFreeMemory(context.getDevice(), stagingBufferMemory, nullptr);
+
+    // Recreate image view with new image
+    textureImageView = resource.createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, mipLevels);
+
+    // Update descriptor sets to use new texture
+    // IMPORTANT: Loop over MAX_FRAMES_IN_FLIGHT, not swapchain images!
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = textureImageView;
+        imageInfo.sampler = textureSampler;
+
+        VkWriteDescriptorSet descriptorWrite{};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = descriptorSets[i];
+        descriptorWrite.dstBinding = 1;
+        descriptorWrite.dstArrayElement = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(context.getDevice(), 1, &descriptorWrite, 0, nullptr);
+    }
+
+    std::cout << "Texture loaded successfully: " << filepath << std::endl;
+}
+// This file will be included at the end of RenderEngine.cpp
+// Contains multi-material texture loading functions
+
+// ============================================================================
+// MULTI-MATERIAL TEXTURE LOADING
+// ============================================================================
+
+void RenderEngine::loadMaterialTextures() {
+    const auto& materials = scene.objects[0].mesh.getMaterials();
+
+    if (materials.empty()) {
+        std::cerr << "No materials found in mesh!" << std::endl;
+        return;
+    }
+
+    materialResources.clear();
+    materialResources.reserve(materials.size());
+
+    std::cout << "Loading " << materials.size() << " material textures..." << std::endl;
+
+    for (size_t i = 0; i < materials.size(); i++) {
+        const Material& mat = materials[i];
+        MaterialResources matRes;
+
+        std::cout << "  Material [" << i << "]: " << mat.name;
+
+        // Check if material has a texture
+        if (mat.diffuseTexturePath.empty()) {
+            std::cout << " - No texture, using default" << std::endl;
+            // Use default white texture (or fallback to legacy textureImage)
+            matRes.textureImage = textureImage;  // Fallback
+            matRes.textureImageView = textureImageView;
+            matRes.textureImageMemory = VK_NULL_HANDLE;  // Don't own it
+            matRes.mipLevels = mipLevels;
+            materialResources.push_back(matRes);
+            continue;
+        }
+
+        std::cout << " - Texture: " << mat.diffuseTexturePath << std::endl;
+
+        // Load texture from file
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load(mat.diffuseTexturePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+
+        if (!pixels) {
+            std::cerr << "    Failed to load texture! Using default." << std::endl;
+            // Fallback to default texture
+            matRes.textureImage = textureImage;
+            matRes.textureImageView = textureImageView;
+            matRes.textureImageMemory = VK_NULL_HANDLE;
+            matRes.mipLevels = mipLevels;
+            materialResources.push_back(matRes);
+            continue;
+        }
+
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+        std::cout << "    Loaded: " << texWidth << "x" << texHeight << " channels: " << texChannels << std::endl;
+
+        // Create staging buffer
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        resource.createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(context.getDevice(), stagingBufferMemory, 0, imageSize, 0, &data);
+        memcpy(data, pixels, static_cast<size_t>(imageSize));
+        vkUnmapMemory(context.getDevice(), stagingBufferMemory);
+
+        stbi_image_free(pixels);
+
+        // Calculate mip levels
+        matRes.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+
+        // Create image
+        resource.createImage(texWidth, texHeight, matRes.mipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                    matRes.textureImage, matRes.textureImageMemory);
+
+        // Transition layout and copy
+        resource.transitionImageLayout(matRes.textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        resource.copyBufferToImage(stagingBuffer, matRes.textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+
+        // Generate mipmaps
+        generateMipmaps(matRes.textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, matRes.mipLevels);
+
+        // Cleanup staging buffer
+        vkDestroyBuffer(context.getDevice(), stagingBuffer, nullptr);
+        vkFreeMemory(context.getDevice(), stagingBufferMemory, nullptr);
+
+        // Create image view
+        matRes.textureImageView = resource.createImageView(matRes.textureImage, VK_FORMAT_R8G8B8A8_SRGB, matRes.mipLevels);
+
+        std::cout << "    Created VkImage + VkImageView with " << matRes.mipLevels << " mip levels" << std::endl;
+
+        materialResources.push_back(matRes);
+    }
+
+    std::cout << "All material textures loaded successfully!" << std::endl;
+}
+
+void RenderEngine::createMaterialDescriptorSets() {
+    if (materialResources.empty()) {
+        std::cerr << "No material resources loaded!" << std::endl;
+        return;
+    }
+
+    std::cout << "Creating " << materialResources.size() << " descriptor sets (one per material)..." << std::endl;
+
+    // Allocate descriptor sets using DescriptorManager
+    std::vector<VkDescriptorSet> tempSets = descriptorManager->allocateSets(
+        descriptorSetLayout, static_cast<uint32_t>(materialResources.size()));
+
+    // Update each material's descriptor set
+    for (size_t i = 0; i < materialResources.size(); i++) {
+        materialResources[i].descriptorSet = tempSets[i];
+
+        // Binding 0: UBO (same for all materials - use frame 0's UBO)
+        descriptorManager->writeBuffer(materialResources[i].descriptorSet, 0,
+                                        uniformBuffers[0], sizeof(UniformBufferObject));
+
+        // Binding 1: Texture sampler
+        descriptorManager->writeImage(materialResources[i].descriptorSet, 1,
+                                       materialResources[i].textureImageView, textureSampler);
+
+        std::cout << "  Descriptor set [" << i << "] created for material" << std::endl;
+    }
+
+    std::cout << "All material descriptor sets created!" << std::endl;
+}
+
+void RenderEngine::cleanupMaterialResources() {
+    for (auto& matRes : materialResources) {
+        // Only cleanup resources we own (not fallback references)
+        if (matRes.textureImageMemory != VK_NULL_HANDLE) {
+            vkDestroyImageView(context.getDevice(), matRes.textureImageView, nullptr);
+            vkDestroyImage(context.getDevice(), matRes.textureImage, nullptr);
+            vkFreeMemory(context.getDevice(), matRes.textureImageMemory, nullptr);
+        }
+    }
+    materialResources.clear();
 }

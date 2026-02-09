@@ -28,6 +28,9 @@ public:
 
     void cleanup(VkDevice device);
 
+    // Update swapchain extent and rebuild pipelines (for window resize)
+    void updateExtent(VkExtent2D newExtent);
+
 private:
     void buildDebugGeometry();
     void createDebugPipeline(VkDevice device, ShaderManager& shaderManager,
@@ -44,4 +47,11 @@ private:
 
     VkPipeline gridPipeline = VK_NULL_HANDLE;
     VkPipelineLayout gridPipelineLayout = VK_NULL_HANDLE;
+
+    // Cached init parameters for pipeline rebuilding
+    VkDevice device = VK_NULL_HANDLE;
+    ShaderManager* shaderManager = nullptr;
+    VkExtent2D swapchainExtent{};
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+    VkRenderPass renderPass = VK_NULL_HANDLE;
 };

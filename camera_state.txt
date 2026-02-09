@@ -1,0 +1,7 @@
+# Camera State
+position 0.495805 0.474407 -1.79822
+target -42.4967 -17.9897 70.6753
+up -0.109203 0.976825 0.184086
+fov 88
+nearPlane 0.1
+farPlane 1000

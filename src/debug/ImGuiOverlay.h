@@ -8,6 +8,9 @@
 class VulkanContext;
 
 struct ImGuiParams {
+    // Lighting Model selection (0=Phong, 1=Blinn-Phong, 2=PBR)
+    int lightingModelIndex = 0;
+
     // Light
     glm::vec3 lightPos{10.0f, 100.0f, -10.0f};
     glm::vec3 lightColor{1.0f, 1.0f, 1.0f};
@@ -18,9 +21,13 @@ struct ImGuiParams {
     float attenuationLinear = 0.045f;
     float attenuationQuadratic = 0.0075f;
 
-    // Material
+    // Material (Phong/Blinn-Phong)
     float ambientStrength = 0.1f;
     float shininess = 32.0f;
+
+    // PBR Material
+    float metalness = 0.0f;   // 0 = dielectric, 1 = metal
+    float roughness = 0.5f;   // 0 = smooth, 1 = rough
 
     // Debug visualization toggles
     bool showDebugAxes = true;
@@ -46,5 +53,8 @@ public:
     void cleanup(VkDevice device);
 
 private:
+    void setupModernStyle();
+
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
+    GLFWwindow* windowHandle = nullptr;
 };

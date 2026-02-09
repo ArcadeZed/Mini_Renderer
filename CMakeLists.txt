@@ -82,6 +82,7 @@ add_executable(MiniRenderer
         src/mesh/Mesh.h
         src/mesh/MeshLoader.cpp
         src/mesh/MeshLoader.h
+        src/scene/Camera.cpp
         src/scene/Camera.h
         src/scene/Transform.h
         src/scene/SceneObject.h
