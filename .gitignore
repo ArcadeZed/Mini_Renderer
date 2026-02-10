@@ -90,3 +90,9 @@ textures/*
 nul
 *.log
 *.tmp
+main_sponza/
+*.png
+*.jpg
+*.py
+*.zip
+*.mtl
