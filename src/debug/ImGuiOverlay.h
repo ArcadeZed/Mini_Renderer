@@ -5,6 +5,12 @@
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 
+#include <filesystem>
+#include <vector>
+
+// FontAwesome icons
+#include "../../external/fonts/IconsFontAwesome6.h"
+
 class VulkanContext;
 
 struct ImGuiParams {
@@ -49,12 +55,26 @@ public:
 
     void beginFrame();
     void buildUI(ImGuiParams& params, class Scene& scene, int& selectedObjectIndex, struct GizmoState& gizmoState, class RenderEngine* renderEngine = nullptr);
+    void buildContentBrowser(class RenderEngine* renderEngine = nullptr);
     void record(VkCommandBuffer cmd);
     void cleanup(VkDevice device);
 
 private:
     void setupModernStyle();
+    void refreshCurrentDirectory();
+    void navigateToDirectory(const std::filesystem::path& path);
+    void buildSceneManagerWindow(class Scene& scene,
+                                  int& selectedObjectIndex,
+                                  struct GizmoState& gizmoState,
+                                  class RenderEngine* renderEngine);
 
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     GLFWwindow* windowHandle = nullptr;
+
+    // Content Browser state
+    std::filesystem::path rootPath;
+    std::filesystem::path currentPath;
+    std::vector<std::filesystem::directory_entry> currentDirectories;
+    std::vector<std::filesystem::directory_entry> currentFiles;
+    bool contentBrowserInitialized = false;
 };

@@ -44,6 +44,13 @@ struct PushConstantObject {
     alignas(16) glm::mat4 model;
 };
 
+// Primitive types for procedural mesh generation
+enum class PrimitiveType {
+    Sphere,
+    Cube,
+    Plane
+};
+
 class RenderEngine {
 public:
     RenderEngine();
@@ -71,6 +78,11 @@ public:
     int getSelectedObjectIndex() const { return selectedObjectIndex; }
     void setSelectedObjectIndex(int index) { selectedObjectIndex = index; }
     void deleteObject(size_t index);
+
+    // Procedural primitive generation
+    void addPrimitive(PrimitiveType type,
+                      const std::string& name,
+                      const glm::vec3& position = glm::vec3(0.0f, 0.0f, 0.0f));
 
     // Gizmo management
     GizmoState& getGizmoState() { return gizmoState; }

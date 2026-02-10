@@ -3,6 +3,7 @@
 #include "../core/PipelineBuilder.h"
 #include "../core/DescriptorManager.h"
 #include "../mesh/MeshLoader.h"
+#include "../mesh/PrimitiveMeshGenerator.h"
 #include "ForwardPass.h"
 #include "PhongLighting.h"
 #include "BlinnPhongLighting.h"
@@ -951,6 +952,52 @@ void RenderEngine::deleteObject(size_t index) {
     }
 
     std::cout << "Object " << index << " deleted (remaining: " << scene.objects.size() << ")" << std::endl;
+}
+
+void RenderEngine::addPrimitive(PrimitiveType type,
+                                 const std::string& name,
+                                 const glm::vec3& position) {
+    // 1. Generate geometry
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+
+    switch (type) {
+        case PrimitiveType::Sphere:
+            PrimitiveMeshGenerator::generateSphere(vertices, indices, 1.0f, 32, 64);
+            break;
+        case PrimitiveType::Cube:
+            PrimitiveMeshGenerator::generateCube(vertices, indices, 1.0f);
+            break;
+        case PrimitiveType::Plane:
+            PrimitiveMeshGenerator::generatePlane(vertices, indices, 10.0f, 10.0f, 1);
+            break;
+    }
+
+    // Save sizes before move
+    size_t vertexCount = vertices.size();
+    size_t indexCount = indices.size();
+
+    // 2. Create SceneObject
+    SceneObject newObject;
+    newObject.name = name;
+    newObject.transform.position = position;
+    newObject.mesh.setGeometry(std::move(vertices), std::move(indices));
+    newObject.useMultiMaterial = false;
+
+    // 3. Upload mesh to GPU
+    newObject.mesh.upload(context.getDevice(), resource, command);
+
+    // 4. Load default material (reuse existing fallback texture)
+    loadMaterialTextures(newObject);  // Existing method handles fallback
+    createMaterialDescriptorSets(newObject);  // Existing method
+
+    // 5. Add to scene
+    scene.objects.push_back(std::move(newObject));
+
+    std::cout << "Primitive added: " << name
+              << " (vertices: " << vertexCount
+              << ", indices: " << indexCount
+              << ", total objects: " << scene.objects.size() << ")" << std::endl;
 }
 
 void RenderEngine::loadTexture(const std::string& filepath) {

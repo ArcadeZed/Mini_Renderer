@@ -1,6 +1,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "rendering/RenderEngine.h"
+#include <imgui.h>
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
@@ -42,6 +43,9 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
 
 // Mouse cursor position callback (for camera movement)
 void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
+    // Don't process camera movement if ImGui wants the mouse input
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
     auto engine = reinterpret_cast<RenderEngine*>(glfwGetWindowUserPointer(window));
     if (!engine) return;
 
@@ -84,6 +88,9 @@ void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
 
 // Mouse scroll callback (for zoom)
 void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
+    // Don't process camera zoom if ImGui wants the mouse input
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
     auto engine = reinterpret_cast<RenderEngine*>(glfwGetWindowUserPointer(window));
     if (!engine) return;
 
@@ -92,6 +99,9 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
 
 // Keyboard callback (for gizmo mode switching)
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    // Don't process scene shortcuts if ImGui wants the keyboard input
+    if (ImGui::GetIO().WantCaptureKeyboard) return;
+
     auto engine = reinterpret_cast<RenderEngine*>(glfwGetWindowUserPointer(window));
     if (!engine) return;
 
