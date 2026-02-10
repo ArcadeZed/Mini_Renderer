@@ -6,7 +6,6 @@ layout(location = 2) in vec3 fragPos;
 layout(location = 3) in vec2 fragUV;
 
 layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
     mat4 view;
     mat4 proj;
     vec3 lightPos;

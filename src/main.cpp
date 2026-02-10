@@ -90,6 +90,39 @@ void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
     engine->getCamera().processMouseScroll(static_cast<float>(yoffset));
 }
 
+// Keyboard callback (for gizmo mode switching)
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    auto engine = reinterpret_cast<RenderEngine*>(glfwGetWindowUserPointer(window));
+    if (!engine) return;
+
+    // Only respond to key press (not release or repeat)
+    if (action != GLFW_PRESS) return;
+
+    // Gizmo mode switching (W/E/R keys)
+    switch (key) {
+        case GLFW_KEY_W:
+            engine->setGizmoMode(GizmoMode::Translate);
+            std::cout << "Gizmo Mode: Translate" << std::endl;
+            break;
+        case GLFW_KEY_E:
+            engine->setGizmoMode(GizmoMode::Rotate);
+            std::cout << "Gizmo Mode: Rotate" << std::endl;
+            break;
+        case GLFW_KEY_R:
+            engine->setGizmoMode(GizmoMode::Scale);
+            std::cout << "Gizmo Mode: Scale" << std::endl;
+            break;
+        case GLFW_KEY_DELETE:
+        case GLFW_KEY_BACKSPACE:
+            // Delete selected object
+            if (engine->getSelectedObjectIndex() >= 0) {
+                engine->deleteObject(static_cast<size_t>(engine->getSelectedObjectIndex()));
+                std::cout << "Deleted selected object" << std::endl;
+            }
+            break;
+    }
+}
+
 // Drag & Drop callback for loading models/textures at runtime
 void dropCallback(GLFWwindow* window, int count, const char** paths) {
     auto engine = reinterpret_cast<RenderEngine*>(glfwGetWindowUserPointer(window));
@@ -183,6 +216,7 @@ int main() {
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
     glfwSetCursorPosCallback(window, cursorPosCallback);
     glfwSetScrollCallback(window, scrollCallback);
+    glfwSetKeyCallback(window, keyCallback);
 
     try {
         engine.init(window);  // Start empty - use Drag & Drop to load meshes

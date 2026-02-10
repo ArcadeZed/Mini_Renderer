@@ -11,7 +11,6 @@ vec2 positions[6] = vec2[](
 );
 
 layout(binding = 0, std140) uniform UniformBufferObject {
-    mat4 model;
     mat4 view;
     mat4 proj;
     vec3 lightPos;

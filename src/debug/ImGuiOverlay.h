@@ -48,7 +48,7 @@ public:
               uint32_t imageCount);
 
     void beginFrame();
-    void buildUI(ImGuiParams& params);
+    void buildUI(ImGuiParams& params, class Scene& scene, int& selectedObjectIndex, struct GizmoState& gizmoState, class RenderEngine* renderEngine = nullptr);
     void record(VkCommandBuffer cmd);
     void cleanup(VkDevice device);
 

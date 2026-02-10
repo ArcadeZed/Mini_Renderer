@@ -59,15 +59,21 @@ void RenderEngine::initVulkan() {
             throw std::runtime_error("Failed to load mesh file: " + meshFilePath);
         }
 
+        // Extract filename from path for display name
+        size_t lastSlash = meshFilePath.find_last_of("/\\");
+        size_t lastDot = meshFilePath.find_last_of(".");
+        std::string filename = meshFilePath.substr(lastSlash + 1, lastDot - lastSlash - 1);
+        userObject.name = filename;
+
         // Set geometry with materials if available
         if (!submeshes.empty()) {
             userObject.mesh.setGeometryWithMaterials(std::move(verts), std::move(inds),
                                                        std::move(submeshes), std::move(materials));
-            useMultiMaterial = true;
+            userObject.useMultiMaterial = true;
             std::cout << "Loaded mesh with " << userObject.mesh.getMaterials().size() << " materials" << std::endl;
         } else {
             userObject.mesh.setGeometry(std::move(verts), std::move(inds));
-            useMultiMaterial = false;
+            userObject.useMultiMaterial = false;
             std::cout << "Loaded single-material mesh" << std::endl;
         }
 
@@ -95,9 +101,9 @@ void RenderEngine::initVulkan() {
     createDescriptorSetLayout();
     createFramebuffers();
 
-    // Upload scene mesh to GPU (if loaded)
-    if (!scene.objects.empty()) {
-        scene.objects[0].mesh.upload(context.getDevice(), resource, command);
+    // Upload ALL scene meshes to GPU (if any loaded)
+    for (auto& obj : scene.objects) {
+        obj.mesh.upload(context.getDevice(), resource, command);
     }
 
     // Create uniform buffers, textures, descriptors
@@ -106,17 +112,21 @@ void RenderEngine::initVulkan() {
     createTextureImageView();
     createTextureSampler();
 
-    // Load material textures if multi-material mesh
-    if (useMultiMaterial && !scene.objects.empty()) {
-        loadMaterialTextures();
+    // Load material textures for each multi-material object
+    for (auto& obj : scene.objects) {
+        if (obj.useMultiMaterial) {
+            loadMaterialTextures(obj);
+        }
     }
 
     createDescriptorPool();
     createDescriptorSets();
 
-    // Create material descriptor sets after pool creation
-    if (useMultiMaterial && !scene.objects.empty()) {
-        createMaterialDescriptorSets();
+    // Create material descriptor sets after pool creation (per-object)
+    for (auto& obj : scene.objects) {
+        if (obj.useMultiMaterial) {
+            createMaterialDescriptorSets(obj);
+        }
     }
 
     // Initialize render sub-systems (AFTER render pass + descriptor layout exist)
@@ -264,12 +274,7 @@ void RenderEngine::createDescriptorSets() {
 void RenderEngine::updateUniformBuffer(uint32_t currentImage) {
     UniformBufferObject ubo{};
 
-    // Use model matrix from first object if scene is not empty, otherwise identity
-    if (!scene.objects.empty()) {
-        ubo.model = scene.objects[0].transform.getModelMatrix();
-    } else {
-        ubo.model = glm::mat4(1.0f);  // Identity matrix
-    }
+    // Model matrix is now passed via push constants per-object, not via UBO
 
     // Update camera aspect ratio based on current swapchain extent
     float aspect = swapchain.getExtent().width / (float)swapchain.getExtent().height;
@@ -599,15 +604,8 @@ void RenderEngine::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     // 1. Scene objects (Phong + texture)
-    // Build material descriptor sets vector for multi-material meshes
-    std::vector<VkDescriptorSet> matDescSets;
-    if (useMultiMaterial) {
-        matDescSets.reserve(materialResources.size());
-        for (const auto& matRes : materialResources) {
-            matDescSets.push_back(matRes.descriptorSet);
-        }
-    }
-    forwardPass->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT], scene, matDescSets);
+    // Each object has its own material descriptor sets - no global list needed
+    forwardPass->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT], scene);
 
     // 2. Debug visualization (grid + axes) - conditional on ImGui toggles
     debugRenderer->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT],
@@ -651,7 +649,7 @@ void RenderEngine::drawFrame() {
 
     // ImGui frame
     imguiOverlay->beginFrame();
-    imguiOverlay->buildUI(imguiParams);
+    imguiOverlay->buildUI(imguiParams, scene, selectedObjectIndex, gizmoState, this);
 
     // Check if lighting model changed and rebuild pipeline if needed
     if (imguiParams.lightingModelIndex != previousLightingModelIndex) {
@@ -775,13 +773,10 @@ void RenderEngine::cleanup() {
     // Command pool (frees all command buffers)
     command.cleanup();
 
-    // Scene mesh GPU buffers
+    // Scene mesh GPU buffers + material textures (per-object cleanup)
     scene.cleanup(context.getDevice());
 
-    // Material textures cleanup (if multi-material)
-    cleanupMaterialResources();
-
-    // Texture cleanup
+    // Legacy texture cleanup (fallback for objects without materials)
     vkDestroySampler(context.getDevice(), textureSampler, nullptr);
     vkDestroyImageView(context.getDevice(), textureImageView, nullptr);
     vkDestroyImage(context.getDevice(), textureImage, nullptr);
@@ -891,43 +886,71 @@ void RenderEngine::loadMesh(const std::string& filepath) {
         return;
     }
 
-    // Update mesh file path for hot-reload
+    // Update mesh file path for hot-reload (tracks last loaded mesh)
     meshFilePath = resolvedPath;
     lastFileModTime = MeshLoader::getModTime(resolvedPath);
 
-    // Cleanup old resources
-    if (!scene.objects.empty()) {
-        scene.objects[0].mesh.cleanup(context.getDevice());
-    }
-    cleanupMaterialResources();  // Cleanup old material textures/descriptor sets
+    // Create NEW scene object (add to scene instead of replacing)
+    SceneObject newObject;
+    newObject.transform.position = glm::vec3(0.0f, 0.0f, 0.0f);  // Default position
 
-    // Create new scene object if scene is empty
-    if (scene.objects.empty()) {
-        scene.objects.push_back(SceneObject{});
-    }
+    // Extract filename from path for display name
+    size_t lastSlash = resolvedPath.find_last_of("/\\");
+    size_t lastDot = resolvedPath.find_last_of(".");
+    std::string filename = resolvedPath.substr(lastSlash + 1, lastDot - lastSlash - 1);
+    newObject.name = filename;
 
-    // Set new geometry
+    // Set geometry with materials if available
     if (!submeshes.empty()) {
-        scene.objects[0].mesh.setGeometryWithMaterials(std::move(verts), std::move(inds),
-                                                        std::move(submeshes), std::move(materials));
-        useMultiMaterial = true;
-        std::cout << "Loaded mesh with " << scene.objects[0].mesh.getMaterials().size() << " materials" << std::endl;
+        newObject.mesh.setGeometryWithMaterials(std::move(verts), std::move(inds),
+                                                 std::move(submeshes), std::move(materials));
+        newObject.useMultiMaterial = true;
+        std::cout << "Loaded mesh with " << newObject.mesh.getMaterials().size() << " materials" << std::endl;
     } else {
-        scene.objects[0].mesh.setGeometry(std::move(verts), std::move(inds));
-        useMultiMaterial = false;
+        newObject.mesh.setGeometry(std::move(verts), std::move(inds));
+        newObject.useMultiMaterial = false;
         std::cout << "Loaded single-material mesh" << std::endl;
     }
 
     // Upload new mesh to GPU
-    scene.objects[0].mesh.upload(context.getDevice(), resource, command);
+    newObject.mesh.upload(context.getDevice(), resource, command);
 
-    // Load material textures and create descriptor sets
-    if (useMultiMaterial) {
-        loadMaterialTextures();
-        createMaterialDescriptorSets();
+    // Load material textures and create descriptor sets (per-object)
+    if (newObject.useMultiMaterial) {
+        loadMaterialTextures(newObject);
+        createMaterialDescriptorSets(newObject);
     }
 
+    // Add to scene
+    scene.objects.push_back(std::move(newObject));
+    std::cout << "Mesh added to scene (total objects: " << scene.objects.size() << ")" << std::endl;
     std::cout << "Mesh loaded successfully: " << resolvedPath << std::endl;
+}
+
+void RenderEngine::deleteObject(size_t index) {
+    if (index >= scene.objects.size()) {
+        std::cerr << "Invalid object index: " << index << std::endl;
+        return;
+    }
+
+    // Wait for GPU to finish using this object
+    vkDeviceWaitIdle(context.getDevice());
+
+    // Cleanup GPU resources for this object
+    scene.objects[index].mesh.cleanup(context.getDevice());
+    scene.objects[index].cleanupMaterialResources(context.getDevice());
+
+    // Remove from scene
+    scene.objects.erase(scene.objects.begin() + index);
+
+    // Update selection if needed
+    if (selectedObjectIndex == static_cast<int>(index)) {
+        selectedObjectIndex = -1;  // Deselect if deleted object was selected
+    } else if (selectedObjectIndex > static_cast<int>(index)) {
+        selectedObjectIndex--;  // Adjust index if object before selection was deleted
+    }
+
+    std::cout << "Object " << index << " deleted (remaining: " << scene.objects.size() << ")" << std::endl;
 }
 
 void RenderEngine::loadTexture(const std::string& filepath) {
@@ -1020,18 +1043,18 @@ void RenderEngine::loadTexture(const std::string& filepath) {
 // MULTI-MATERIAL TEXTURE LOADING
 // ============================================================================
 
-void RenderEngine::loadMaterialTextures() {
-    const auto& materials = scene.objects[0].mesh.getMaterials();
+void RenderEngine::loadMaterialTextures(SceneObject& object) {
+    const auto& materials = object.mesh.getMaterials();
 
     if (materials.empty()) {
         std::cerr << "No materials found in mesh!" << std::endl;
         return;
     }
 
-    materialResources.clear();
-    materialResources.reserve(materials.size());
+    object.materialResources.clear();
+    object.materialResources.reserve(materials.size());
 
-    std::cout << "Loading " << materials.size() << " material textures..." << std::endl;
+    std::cout << "Loading " << materials.size() << " material textures for object..." << std::endl;
 
     for (size_t i = 0; i < materials.size(); i++) {
         const Material& mat = materials[i];
@@ -1047,7 +1070,7 @@ void RenderEngine::loadMaterialTextures() {
             matRes.textureImageView = textureImageView;
             matRes.textureImageMemory = VK_NULL_HANDLE;  // Don't own it
             matRes.mipLevels = mipLevels;
-            materialResources.push_back(matRes);
+            object.materialResources.push_back(matRes);
             continue;
         }
 
@@ -1064,7 +1087,7 @@ void RenderEngine::loadMaterialTextures() {
             matRes.textureImageView = textureImageView;
             matRes.textureImageMemory = VK_NULL_HANDLE;
             matRes.mipLevels = mipLevels;
-            materialResources.push_back(matRes);
+            object.materialResources.push_back(matRes);
             continue;
         }
 
@@ -1112,50 +1135,39 @@ void RenderEngine::loadMaterialTextures() {
 
         std::cout << "    Created VkImage + VkImageView with " << matRes.mipLevels << " mip levels" << std::endl;
 
-        materialResources.push_back(matRes);
+        object.materialResources.push_back(matRes);
     }
 
-    std::cout << "All material textures loaded successfully!" << std::endl;
+    std::cout << "All material textures loaded successfully for this object!" << std::endl;
 }
 
-void RenderEngine::createMaterialDescriptorSets() {
-    if (materialResources.empty()) {
-        std::cerr << "No material resources loaded!" << std::endl;
+void RenderEngine::createMaterialDescriptorSets(SceneObject& object) {
+    if (object.materialResources.empty()) {
+        std::cerr << "No material resources loaded for this object!" << std::endl;
         return;
     }
 
-    std::cout << "Creating " << materialResources.size() << " descriptor sets (one per material)..." << std::endl;
+    std::cout << "Creating " << object.materialResources.size() << " descriptor sets (one per material)..." << std::endl;
 
     // Allocate descriptor sets using DescriptorManager
     std::vector<VkDescriptorSet> tempSets = descriptorManager->allocateSets(
-        descriptorSetLayout, static_cast<uint32_t>(materialResources.size()));
+        descriptorSetLayout, static_cast<uint32_t>(object.materialResources.size()));
 
     // Update each material's descriptor set
-    for (size_t i = 0; i < materialResources.size(); i++) {
-        materialResources[i].descriptorSet = tempSets[i];
+    for (size_t i = 0; i < object.materialResources.size(); i++) {
+        object.materialResources[i].descriptorSet = tempSets[i];
 
         // Binding 0: UBO (same for all materials - use frame 0's UBO)
-        descriptorManager->writeBuffer(materialResources[i].descriptorSet, 0,
+        descriptorManager->writeBuffer(object.materialResources[i].descriptorSet, 0,
                                         uniformBuffers[0], sizeof(UniformBufferObject));
 
         // Binding 1: Texture sampler
-        descriptorManager->writeImage(materialResources[i].descriptorSet, 1,
-                                       materialResources[i].textureImageView, textureSampler);
+        descriptorManager->writeImage(object.materialResources[i].descriptorSet, 1,
+                                       object.materialResources[i].textureImageView, textureSampler);
 
         std::cout << "  Descriptor set [" << i << "] created for material" << std::endl;
     }
 
-    std::cout << "All material descriptor sets created!" << std::endl;
+    std::cout << "All material descriptor sets created for this object!" << std::endl;
 }
 
-void RenderEngine::cleanupMaterialResources() {
-    for (auto& matRes : materialResources) {
-        // Only cleanup resources we own (not fallback references)
-        if (matRes.textureImageMemory != VK_NULL_HANDLE) {
-            vkDestroyImageView(context.getDevice(), matRes.textureImageView, nullptr);
-            vkDestroyImage(context.getDevice(), matRes.textureImage, nullptr);
-            vkFreeMemory(context.getDevice(), matRes.textureImageMemory, nullptr);
-        }
-    }
-    materialResources.clear();
-}

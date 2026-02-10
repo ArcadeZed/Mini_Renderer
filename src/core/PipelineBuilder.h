@@ -25,9 +25,14 @@ class PipelineBuilder {
 public:
     explicit PipelineBuilder(VkDevice device);
 
-    // Required: shader stages
+    // Required: shader stages (vertex + fragment)
     PipelineBuilder& setShaders(ShaderManager& shaderManager,
                                 const std::string& vertPath, const std::string& fragPath);
+
+    // Required: shader stages (vertex + geometry + fragment)
+    PipelineBuilder& setShaders(ShaderManager& shaderManager,
+                                const std::string& vertPath, const std::string& geomPath,
+                                const std::string& fragPath);
 
     // Vertex input (default: no vertex input)
     PipelineBuilder& setVertexInput(VkVertexInputBindingDescription binding,
@@ -67,8 +72,8 @@ public:
 private:
     VkDevice device;
 
-    // Shader stages (set by setShaders)
-    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+    // Shader stages (set by setShaders) - flexible for 2 or 3 stages
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
     bool shadersSet = false;
 
     // Vertex input

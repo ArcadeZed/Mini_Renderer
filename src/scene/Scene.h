@@ -14,6 +14,7 @@ struct Scene {
     void cleanup(VkDevice device) {
         for (auto& obj : objects) {
             obj.mesh.cleanup(device);
+            obj.cleanupMaterialResources(device);
         }
     }
 };

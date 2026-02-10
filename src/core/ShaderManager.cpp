@@ -69,6 +69,34 @@ std::array<VkPipelineShaderStageCreateInfo, 2> ShaderManager::loadVertexFragment
     return {vertStageInfo, fragStageInfo};
 }
 
+std::array<VkPipelineShaderStageCreateInfo, 3> ShaderManager::loadVertexGeometryFragmentStages(
+    const std::string& vertPath, const std::string& geomPath, const std::string& fragPath) {
+
+    VkShaderModule vertModule = loadShader(vertPath);
+    VkShaderModule geomModule = loadShader(geomPath);
+    VkShaderModule fragModule = loadShader(fragPath);
+
+    VkPipelineShaderStageCreateInfo vertStageInfo{};
+    vertStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertStageInfo.module = vertModule;
+    vertStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo geomStageInfo{};
+    geomStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    geomStageInfo.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+    geomStageInfo.module = geomModule;
+    geomStageInfo.pName = "main";
+
+    VkPipelineShaderStageCreateInfo fragStageInfo{};
+    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragStageInfo.module = fragModule;
+    fragStageInfo.pName = "main";
+
+    return {vertStageInfo, geomStageInfo, fragStageInfo};
+}
+
 void ShaderManager::cleanup() {
     for (auto& [path, module] : cache) {
         vkDestroyShaderModule(device, module, nullptr);

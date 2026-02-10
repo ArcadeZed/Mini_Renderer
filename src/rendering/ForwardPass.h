@@ -23,8 +23,7 @@ public:
 
     void record(VkCommandBuffer cmd,
                 VkDescriptorSet globalDescriptorSet,
-                const Scene& scene,
-                const std::vector<VkDescriptorSet>& materialDescriptorSets = {});
+                const Scene& scene);
 
     void cleanup(VkDevice device);
 

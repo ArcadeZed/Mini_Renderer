@@ -1,5 +1,8 @@
 #include "ImGuiOverlay.h"
 #include "../core/VulkanContext.h"
+#include "../scene/Scene.h"
+#include "../rendering/RenderEngine.h"
+#include "../gizmo/GizmoState.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -69,7 +72,7 @@ void ImGuiOverlay::beginFrame() {
     ImGui::NewFrame();
 }
 
-void ImGuiOverlay::buildUI(ImGuiParams& params) {
+void ImGuiOverlay::buildUI(ImGuiParams& params, class Scene& scene, int& selectedObjectIndex, struct GizmoState& gizmoState, class RenderEngine* renderEngine) {
     // Get window dimensions for right-side anchoring
     int windowWidth, windowHeight;
     glfwGetWindowSize(windowHandle, &windowWidth, &windowHeight);
@@ -100,9 +103,9 @@ void ImGuiOverlay::buildUI(ImGuiParams& params) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
     if (ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::PopStyleColor();
-        ImGui::DragFloat3("Position", &params.lightPos.x, 0.5f);
-        ImGui::ColorEdit3("Color", &params.lightColor.x);
-        ImGui::SliderFloat("Intensity", &params.lightIntensity, 0.0f, 1000.0f);
+        ImGui::DragFloat3("Position##Light", &params.lightPos.x, 0.5f);
+        ImGui::ColorEdit3("Color##Light", &params.lightColor.x);
+        ImGui::SliderFloat("Intensity##Light", &params.lightIntensity, 0.0f, 1000.0f);
     } else {
         ImGui::PopStyleColor();
     }
@@ -110,9 +113,9 @@ void ImGuiOverlay::buildUI(ImGuiParams& params) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
     if (ImGui::CollapsingHeader("Attenuation")) {
         ImGui::PopStyleColor();
-        ImGui::SliderFloat("Constant", &params.attenuationConstant, 0.0f, 5.0f);
-        ImGui::SliderFloat("Linear", &params.attenuationLinear, 0.0f, 0.5f);
-        ImGui::SliderFloat("Quadratic", &params.attenuationQuadratic, 0.0f, 0.1f);
+        ImGui::SliderFloat("Constant##Attenuation", &params.attenuationConstant, 0.0f, 5.0f);
+        ImGui::SliderFloat("Linear##Attenuation", &params.attenuationLinear, 0.0f, 0.5f);
+        ImGui::SliderFloat("Quadratic##Attenuation", &params.attenuationQuadratic, 0.0f, 0.1f);
     } else {
         ImGui::PopStyleColor();
     }
@@ -122,17 +125,81 @@ void ImGuiOverlay::buildUI(ImGuiParams& params) {
         ImGui::PopStyleColor();
         // Phong/Blinn-Phong parameters
         if (params.lightingModelIndex <= 1) {
-            ImGui::SliderFloat("Ambient", &params.ambientStrength, 0.0f, 1.0f);
-            ImGui::SliderFloat("Shininess", &params.shininess, 1.0f, 256.0f);
+            ImGui::SliderFloat("Ambient##Material", &params.ambientStrength, 0.0f, 1.0f);
+            ImGui::SliderFloat("Shininess##Material", &params.shininess, 1.0f, 256.0f);
         }
 
         // PBR parameters
         if (params.lightingModelIndex == 2) {
-            ImGui::SliderFloat("Metalness", &params.metalness, 0.0f, 1.0f);
-            ImGui::SliderFloat("Roughness", &params.roughness, 0.01f, 1.0f);
+            ImGui::SliderFloat("Metalness##Material", &params.metalness, 0.0f, 1.0f);
+            ImGui::SliderFloat("Roughness##Material", &params.roughness, 0.01f, 1.0f);
             ImGui::TextWrapped("Metalness: 0=Plastic/Wood, 1=Gold/Iron");
             ImGui::TextWrapped("Roughness: 0=Mirror, 1=Matte");
         }
+    } else {
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PopStyleColor();
+
+        // Camera position (read from camera, apply via setter)
+        glm::vec3 camPos = scene.camera.getPosition();
+        if (ImGui::DragFloat3("Position##Camera", &camPos.x, 0.5f)) {
+            scene.camera.setPosition(camPos);
+        }
+
+        // Camera target
+        glm::vec3 camTarget = scene.camera.getTarget();
+        if (ImGui::DragFloat3("Target##Camera", &camTarget.x, 0.5f)) {
+            scene.camera.setTarget(camTarget);
+        }
+
+        // FOV
+        float fov = scene.camera.getFOV();
+        if (ImGui::SliderFloat("FOV##Camera", &fov, 30.0f, 120.0f, "%.1f°")) {
+            scene.camera.setFOV(fov);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Clipping Planes:");
+
+        // Near/Far planes (editable)
+        float nearPlane = scene.camera.getNearPlane();
+        float farPlane = scene.camera.getFarPlane();
+
+        bool planesChanged = false;
+        planesChanged |= ImGui::SliderFloat("Near Plane##Camera", &nearPlane, 0.01f, 10.0f, "%.3f");
+        planesChanged |= ImGui::SliderFloat("Far Plane##Camera", &farPlane, 100.0f, 10000.0f, "%.1f");
+
+        if (planesChanged) {
+            scene.camera.setClipPlanes(nearPlane, farPlane);
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Movement Settings:");
+
+        // Move speed
+        float moveSpeed = scene.camera.getMoveSpeed();
+        if (ImGui::SliderFloat("Move Speed##Camera", &moveSpeed, 1.0f, 200.0f, "%.1f u/s")) {
+            scene.camera.setMoveSpeed(moveSpeed);
+        }
+
+        // Mouse sensitivity
+        float mouseSens = scene.camera.getMouseSensitivity();
+        if (ImGui::SliderFloat("Mouse Sensitivity##Camera", &mouseSens, 0.001f, 0.02f, "%.4f")) {
+            scene.camera.setMouseSensitivity(mouseSens);
+        }
+
+        // Scroll speed
+        float scrollSpeed = scene.camera.getScrollSpeed();
+        if (ImGui::SliderFloat("Scroll Speed##Camera", &scrollSpeed, 1.0f, 20.0f, "%.1f")) {
+            scene.camera.setScrollSpeed(scrollSpeed);
+        }
+
+        ImGui::Separator();
+        ImGui::TextWrapped("Right Mouse: Fly | Alt+Left: Orbit | Middle: Pan | Scroll: Zoom");
     } else {
         ImGui::PopStyleColor();
     }
@@ -142,6 +209,79 @@ void ImGuiOverlay::buildUI(ImGuiParams& params) {
         ImGui::PopStyleColor();
         ImGui::Checkbox("Show Axes", &params.showDebugAxes);
         ImGui::Checkbox("Show Grid", &params.showGrid);
+    } else {
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+    if (ImGui::CollapsingHeader("Scene Hierarchy", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PopStyleColor();
+
+        ImGui::Text("Objects: %zu", scene.objects.size());
+        ImGui::Separator();
+
+        // List all objects with selection + delete
+        for (size_t i = 0; i < scene.objects.size(); i++) {
+            ImGui::PushID(static_cast<int>(i));
+
+            // Selectable object row
+            bool isSelected = (selectedObjectIndex == static_cast<int>(i));
+
+            // Color coding for selected object
+            if (isSelected) {
+                ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.3f, 0.5f, 0.8f, 0.8f));
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.4f, 0.6f, 0.9f, 0.9f));
+            }
+
+            if (ImGui::Selectable(scene.objects[i].name.c_str(), isSelected)) {
+                selectedObjectIndex = static_cast<int>(i);
+            }
+
+            if (isSelected) {
+                ImGui::PopStyleColor(2);
+            }
+
+            // Right-click context menu
+            if (ImGui::BeginPopupContextItem()) {
+                if (ImGui::MenuItem("Delete")) {
+                    if (renderEngine) {
+                        renderEngine->deleteObject(i);
+                    }
+                }
+                if (ImGui::MenuItem("Rename")) {
+                    // TODO: Implement rename dialog
+                }
+                ImGui::EndPopup();
+            }
+
+            ImGui::PopID();
+        }
+
+        ImGui::Separator();
+
+        // Selected object details
+        if (selectedObjectIndex >= 0 && selectedObjectIndex < static_cast<int>(scene.objects.size())) {
+            ImGui::Text("Selected: %s", scene.objects[selectedObjectIndex].name.c_str());
+            ImGui::Text("Vertices: %zu", scene.objects[selectedObjectIndex].mesh.getVertices().size());
+            ImGui::Text("Indices: %zu", scene.objects[selectedObjectIndex].mesh.getIndices().size());
+
+            // Gizmo mode indicator
+            ImGui::Separator();
+            ImGui::Text("Gizmo Mode:");
+            const char* modeNames[] = { "Translate (W)", "Rotate (E)", "Scale (R)" };
+            int currentMode = static_cast<int>(gizmoState.mode);
+            if (ImGui::Combo("##GizmoMode", &currentMode, modeNames, 3)) {
+                gizmoState.mode = static_cast<GizmoMode>(currentMode);
+            }
+            ImGui::TextWrapped("Press W/E/R to switch modes");
+
+            // Transform controls
+            ImGui::Separator();
+            auto& transform = scene.objects[selectedObjectIndex].transform;
+            ImGui::DragFloat3("Position##Object", &transform.position.x, 0.1f);
+            ImGui::DragFloat3("Rotation##Object", &transform.rotation.x, 1.0f);
+            ImGui::DragFloat3("Scale##Object", &transform.scale.x, 0.01f);
+        }
     } else {
         ImGui::PopStyleColor();
     }

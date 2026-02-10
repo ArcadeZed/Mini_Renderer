@@ -33,70 +33,30 @@ void DebugRenderer::buildDebugGeometry() {
     std::vector<Vertex> verts;
     std::vector<uint32_t> inds;
 
-    uint32_t indexOffset = 0;
-
-    // ========== AXES (LONG - extend far into distance) ==========
+    // ========== AXES (SIMPLE LINES) ==========
+    // Geometry Shader will create quads with constant screen-space thickness
     const float axisLength = 1000.0f;
-    const float axisThickness = 0.05f;
 
-    // X-Axis (Red) - from -1000 to +1000
-    verts.push_back({{-axisLength, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{ axisLength, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{ axisLength, axisThickness, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{-axisLength, axisThickness, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
-    indexOffset += 4;
+    // ========== X-Axis (Red) - from -1000 to +1000 ==========
+    verts.push_back({{-axisLength, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+    verts.push_back({{ axisLength, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+    inds.push_back(0);
+    inds.push_back(1);
 
-    // Y-Axis (Green) - from 0 to +1000 (only positive, ground is at y=0)
-    verts.push_back({{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{axisThickness, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{axisThickness, axisLength, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{0.0f, axisLength, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
-    indexOffset += 4;
+    // ========== Y-Axis (Green) - from 0 to +1000 (only positive) ==========
+    verts.push_back({{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+    verts.push_back({{0.0f, axisLength, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+    inds.push_back(2);
+    inds.push_back(3);
 
-    // Z-Axis (Blue) - from -1000 to +1000
-    verts.push_back({{0.0f, 0.0f, -axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{axisThickness, 0.0f, -axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{axisThickness, 0.0f, axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{0.0f, 0.0f, axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
-    indexOffset += 4;
-
-    // ========== GRID LINES (Gray) - XZ plane at Y=0 ==========
-    // Line along X at Z=-1
-    verts.push_back({{-1.0f, 0.0f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{ 1.0f, 0.0f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{ 1.0f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{-1.0f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
-    indexOffset += 4;
-
-    // Line along X at Z=1
-    verts.push_back({{-1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{ 1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{ 1.0f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{-1.0f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
-    indexOffset += 4;
-
-    // Line along Z at X=-1
-    verts.push_back({{-1.0f, 0.0f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{-1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{-0.99f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{-0.99f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
-    indexOffset += 4;
-
-    // Line along Z at X=1
-    verts.push_back({{1.0f, 0.0f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}});
-    verts.push_back({{1.0f, 0.0f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}});
-    verts.push_back({{1.01f, 0.01f, 1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}});
-    verts.push_back({{1.01f, 0.01f, -1.0f}, {0.3f, 0.3f, 0.3f}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f}});
-    inds.insert(inds.end(), {static_cast<uint32_t>(indexOffset+0), static_cast<uint32_t>(indexOffset+1), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+2), static_cast<uint32_t>(indexOffset+3), static_cast<uint32_t>(indexOffset+0)});
+    // ========== Z-Axis (Blue) - from -1000 to +1000 ==========
+    verts.push_back({{0.0f, 0.0f, -axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+    verts.push_back({{0.0f, 0.0f,  axisLength}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+    inds.push_back(4);
+    inds.push_back(5);
 
     debugMesh.setGeometry(std::move(verts), std::move(inds));
-    std::cout << "DebugRenderer: Debug geometry built." << std::endl;
+    std::cout << "DebugRenderer: Debug geometry built (lines for geometry shader)." << std::endl;
 }
 
 void DebugRenderer::createDebugPipeline(VkDevice device, ShaderManager& shaderManager,
@@ -105,22 +65,31 @@ void DebugRenderer::createDebugPipeline(VkDevice device, ShaderManager& shaderMa
     auto bindingDescription = Vertex::getBindingDescription();
     auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
+    // Push constants for viewport size and line width
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_GEOMETRY_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(float) * 3;  // vec2 viewportSize + float lineWidth
+
     auto result = PipelineBuilder(device)
         .setShaders(shaderManager,
                     std::string(SHADER_DIR) + "/debug.vert.spv",
+                    std::string(SHADER_DIR) + "/debug.geom.spv",
                     std::string(SHADER_DIR) + "/debug.frag.spv")
         .setVertexInput(bindingDescription, attributeDescriptions.data(),
                         static_cast<uint32_t>(attributeDescriptions.size()))
+        .setTopology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
         .setViewport(extent)
         .setCullMode(VK_CULL_MODE_NONE)
         .setDepthTest(true, false, VK_COMPARE_OP_ALWAYS)
         .setDescriptorLayouts({layout})
+        .setPushConstants({pushConstantRange})
         .setRenderPass(renderPass)
         .build();
 
     debugPipeline = result.pipeline;
     debugPipelineLayout = result.layout;
-    std::cout << "DebugRenderer: Debug pipeline created." << std::endl;
+    std::cout << "DebugRenderer: Debug pipeline created (with geometry shader)." << std::endl;
 }
 
 void DebugRenderer::createGridPipeline(VkDevice device, ShaderManager& shaderManager,
@@ -153,11 +122,25 @@ void DebugRenderer::record(VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
         vkCmdDraw(cmd, 6, 1, 0, 0);
     }
 
-    // Draw 2: Debug Axes (always on top, unlit)
+    // Draw 2: Debug Axes (always on top, constant screen-space thickness)
     if (drawAxes) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, debugPipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 debugPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+        // Push constants: viewport size + line width
+        struct {
+            float viewportWidth;
+            float viewportHeight;
+            float lineWidth;
+        } pushConstants;
+        pushConstants.viewportWidth = static_cast<float>(swapchainExtent.width);
+        pushConstants.viewportHeight = static_cast<float>(swapchainExtent.height);
+        pushConstants.lineWidth = 3.0f;  // Line width in pixels
+
+        vkCmdPushConstants(cmd, debugPipelineLayout, VK_SHADER_STAGE_GEOMETRY_BIT,
+                           0, sizeof(pushConstants), &pushConstants);
+
         debugMesh.bind(cmd);
         debugMesh.draw(cmd);
     }

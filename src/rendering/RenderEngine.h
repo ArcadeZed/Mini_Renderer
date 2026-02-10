@@ -16,6 +16,7 @@
 #include "core/VulkanResource.h"
 #include "scene/Scene.h"
 #include "debug/ImGuiOverlay.h"
+#include "gizmo/GizmoState.h"
 
 class ShaderManager;
 class DescriptorManager;
@@ -23,7 +24,6 @@ class ForwardPass;
 class DebugRenderer;
 
 struct UniformBufferObject {
-    alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
     alignas(16) glm::vec3 lightPos;
@@ -37,6 +37,11 @@ struct UniformBufferObject {
     alignas(4) float attenuationQuadratic;
     alignas(4) float metalness;  // PBR: 0 = dielectric, 1 = metal
     alignas(4) float roughness;  // PBR: 0 = smooth, 1 = rough
+};
+
+// Push constants for per-object data (model matrix)
+struct PushConstantObject {
+    alignas(16) glm::mat4 model;
 };
 
 class RenderEngine {
@@ -61,6 +66,16 @@ public:
     // Camera access (for input handling from main.cpp)
     Camera& getCamera() { return scene.camera; }
 
+    // Scene management
+    Scene& getScene() { return scene; }
+    int getSelectedObjectIndex() const { return selectedObjectIndex; }
+    void setSelectedObjectIndex(int index) { selectedObjectIndex = index; }
+    void deleteObject(size_t index);
+
+    // Gizmo management
+    GizmoState& getGizmoState() { return gizmoState; }
+    void setGizmoMode(GizmoMode mode) { gizmoState.mode = mode; }
+
 private:
     void initVulkan();
     void createRenderPass();
@@ -84,10 +99,9 @@ private:
     void generateMipmaps(VkImage image, VkFormat imageFormat,
                          int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
 
-    // Multi-material texture loading
-    void loadMaterialTextures();
-    void createMaterialDescriptorSets();
-    void cleanupMaterialResources();
+    // Multi-material texture loading (per-object)
+    void loadMaterialTextures(SceneObject& object);
+    void createMaterialDescriptorSets(SceneObject& object);
 
     void createSyncObjects();
     void recreateBuffers();
@@ -130,23 +144,12 @@ private:
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
 
-    // Texture Resources (Legacy - for single-material meshes)
+    // Texture Resources (Legacy - for single-material meshes without textures)
     VkImage textureImage = VK_NULL_HANDLE;
     VkDeviceMemory textureImageMemory = VK_NULL_HANDLE;
     VkImageView textureImageView = VK_NULL_HANDLE;
     VkSampler textureSampler = VK_NULL_HANDLE;
     uint32_t mipLevels = 1;
-
-    // Multi-material Resources (NEW)
-    struct MaterialResources {
-        VkImage textureImage = VK_NULL_HANDLE;
-        VkDeviceMemory textureImageMemory = VK_NULL_HANDLE;
-        VkImageView textureImageView = VK_NULL_HANDLE;
-        uint32_t mipLevels = 1;
-        VkDescriptorSet descriptorSet = VK_NULL_HANDLE;  // Descriptor set for this material
-    };
-    std::vector<MaterialResources> materialResources;  // One per material in mesh
-    bool useMultiMaterial = false;  // Flag: true if mesh has multiple materials
 
     // Command buffers (allocated once, re-recorded each frame)
     std::vector<VkCommandBuffer> commandBuffers;
@@ -160,6 +163,10 @@ private:
 
     // Scene
     Scene scene;
+    int selectedObjectIndex = -1;  // Index of selected object (-1 = none)
+
+    // Gizmo
+    GizmoState gizmoState;
 
     // Hot-reload state
     std::string meshFilePath;

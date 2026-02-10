@@ -7,7 +7,17 @@ PipelineBuilder::PipelineBuilder(VkDevice device) : device(device) {}
 
 PipelineBuilder& PipelineBuilder::setShaders(ShaderManager& shaderManager,
                                               const std::string& vertPath, const std::string& fragPath) {
-    shaderStages = shaderManager.loadVertexFragmentStages(vertPath, fragPath);
+    auto stages = shaderManager.loadVertexFragmentStages(vertPath, fragPath);
+    shaderStages.assign(stages.begin(), stages.end());
+    shadersSet = true;
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::setShaders(ShaderManager& shaderManager,
+                                              const std::string& vertPath, const std::string& geomPath,
+                                              const std::string& fragPath) {
+    auto stages = shaderManager.loadVertexGeometryFragmentStages(vertPath, geomPath, fragPath);
+    shaderStages.assign(stages.begin(), stages.end());
     shadersSet = true;
     return *this;
 }

@@ -19,6 +19,10 @@ public:
     std::array<VkPipelineShaderStageCreateInfo, 2> loadVertexFragmentStages(
         const std::string& vertPath, const std::string& fragPath);
 
+    // Convenience: load vertex + geometry + fragment and return pipeline stage infos
+    std::array<VkPipelineShaderStageCreateInfo, 3> loadVertexGeometryFragmentStages(
+        const std::string& vertPath, const std::string& geomPath, const std::string& fragPath);
+
     // Destroy all cached shader modules
     void cleanup();
 

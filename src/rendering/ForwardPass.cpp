@@ -5,6 +5,7 @@
 #include "../core/PipelineBuilder.h"
 #include "../mesh/Mesh.h"
 #include "../scene/Scene.h"
+#include <glm/glm.hpp>
 #include <iostream>
 #include <string>
 
@@ -46,6 +47,12 @@ void ForwardPass::buildPipeline() {
     auto bindingDescription = Vertex::getBindingDescription();
     auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
+    // Push constant range for per-object model matrix
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(glm::mat4);  // 64 bytes
+
     auto result = PipelineBuilder(device)
         .setShaders(*shaderManager,
                     std::string(SHADER_DIR) + "/shader.vert.spv",
@@ -56,6 +63,7 @@ void ForwardPass::buildPipeline() {
         .setCullMode(VK_CULL_MODE_BACK_BIT)
         .setDepthTest(true, true, VK_COMPARE_OP_LESS)
         .setDescriptorLayouts({descriptorSetLayout})
+        .setPushConstants({pushConstantRange})
         .setRenderPass(renderPass)
         .build();
 
@@ -67,25 +75,29 @@ void ForwardPass::buildPipeline() {
 
 void ForwardPass::record(VkCommandBuffer cmd,
                          VkDescriptorSet globalDescriptorSet,
-                         const Scene& scene,
-                         const std::vector<VkDescriptorSet>& materialDescriptorSets) {
+                         const Scene& scene) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
     // Draw all scene objects
     for (const auto& obj : scene.objects) {
         if (!obj.mesh.isUploaded()) continue;
 
+        // Push this object's model matrix as a push constant
+        glm::mat4 modelMatrix = obj.transform.getModelMatrix();
+        vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                           0, sizeof(glm::mat4), &modelMatrix);
+
         obj.mesh.bind(cmd);
 
-        // Multi-material mesh: loop over submeshes and bind per-material descriptor sets
-        if (obj.mesh.hasMultipleMaterials()) {
+        // Multi-material mesh: loop over submeshes and bind per-material descriptor sets from object
+        if (obj.mesh.hasMultipleMaterials() && obj.useMultiMaterial) {
             const auto& submeshes = obj.mesh.getSubMeshes();
             for (size_t i = 0; i < submeshes.size(); i++) {
                 const auto& submesh = submeshes[i];
 
-                // Bind descriptor set for this material
-                if (submesh.materialIndex < materialDescriptorSets.size()) {
-                    VkDescriptorSet matDescSet = materialDescriptorSets[submesh.materialIndex];
+                // Bind descriptor set for this material (from this object's materialResources)
+                if (submesh.materialIndex < obj.materialResources.size()) {
+                    VkDescriptorSet matDescSet = obj.materialResources[submesh.materialIndex].descriptorSet;
                     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             pipelineLayout, 0, 1, &matDescSet, 0, nullptr);
                 }

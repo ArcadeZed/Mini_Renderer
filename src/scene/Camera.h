@@ -36,6 +36,16 @@ public:
     const glm::vec3& getPosition() const { return position; }
     const glm::vec3& getTarget() const { return target; }
     float getFOV() const { return fov; }
+    float getNearPlane() const { return nearPlane; }
+    float getFarPlane() const { return farPlane; }
+    float getMoveSpeed() const { return moveSpeed; }
+    float getMouseSensitivity() const { return mouseSensitivity; }
+    float getScrollSpeed() const { return scrollSpeed; }
+
+    // Additional setters for runtime adjustment
+    void setMoveSpeed(float speed) { moveSpeed = speed; }
+    void setMouseSensitivity(float sensitivity) { mouseSensitivity = sensitivity; }
+    void setScrollSpeed(float speed) { scrollSpeed = speed; }
 
     // State persistence
     void saveState(const std::string& filepath) const;

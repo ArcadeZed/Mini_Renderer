@@ -6,7 +6,6 @@ layout(location = 2) in vec3 inNormal;    // Not used, but must match vertex str
 layout(location = 3) in vec2 inUV;        // Not used, but must match vertex structure
 
 layout(binding = 0, std140) uniform UniformBufferObject {
-    mat4 model;
     mat4 view;
     mat4 proj;
     vec3 lightPos;
@@ -16,12 +15,13 @@ layout(binding = 0, std140) uniform UniformBufferObject {
     float shininess;
 } ubo;
 
-layout(location = 0) out vec3 fragColor;
+// Output to Geometry Shader - only clip space position and color
+layout(location = 0) out vec3 outColor;
 
 void main() {
-    // Simple MVP transformation
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
+    // Transform line endpoint to clip space
+    gl_Position = ubo.proj * ubo.view * vec4(inPosition, 1.0);
 
-    // Pass through vertex color unchanged (no lighting, no texture)
-    fragColor = inColor;
+    // Pass color to geometry shader
+    outColor = inColor;
 }
