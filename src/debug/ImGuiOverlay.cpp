@@ -527,7 +527,7 @@ void ImGuiOverlay::buildSceneManagerWindow(Scene& scene,
                             light.shadowMapResolution = resolutions[currentResIdx];
                         }
 
-                        // Directional light specific
+                        // Light-type-specific shadow settings
                         if (light.type == LightType::DIRECTIONAL) {
                             ImGui::DragFloat("Ortho Size##Light", &light.shadowOrthoSize, 1.0f, 1.0f, 5000.0f, "%.1f");
                             if (ImGui::IsItemHovered()) {
@@ -535,24 +535,59 @@ void ImGuiOverlay::buildSceneManagerWindow(Scene& scene,
                             }
                             ImGui::DragFloat("Near Plane##Light", &light.shadowNearPlane, 0.1f, 0.01f, 100.0f, "%.2f");
                             ImGui::DragFloat("Far Plane##Light", &light.shadowFarPlane, 10.0f, 10.0f, 50000.0f, "%.1f");
+                        } else if (light.type == LightType::POINT) {
+                            ImGui::DragFloat("Near Plane##Light", &light.shadowNearPlane, 0.01f, 0.01f, 10.0f, "%.3f");
+                            ImGui::DragFloat("Far Plane##Light", &light.shadowFarPlane, 1.0f, 1.0f, 500.0f, "%.1f");
                         }
 
                         // Shadow Map Preview
                         if (renderEngine && renderEngine->getShadowPass()) {
                             ImGui::Separator();
-                            ImGui::Text("Shadow Map Preview:");
 
-                            if (shadowMapImGuiDescriptor == VK_NULL_HANDLE) {
-                                shadowMapImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
-                                    renderEngine->getShadowPass()->getShadowMapSampler(),
-                                    renderEngine->getShadowPass()->getShadowMapPreviewView(),
-                                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                                );
-                            }
+                            if (light.type == LightType::DIRECTIONAL) {
+                                // 2D shadow map preview
+                                ImGui::Text("Shadow Map Preview:");
 
-                            if (shadowMapImGuiDescriptor != VK_NULL_HANDLE) {
-                                float previewSize = ImGui::GetContentRegionAvail().x;
-                                ImGui::Image(shadowMapImGuiDescriptor, ImVec2(previewSize, previewSize));
+                                if (shadowMapImGuiDescriptor == VK_NULL_HANDLE) {
+                                    shadowMapImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
+                                        renderEngine->getShadowPass()->getShadowMapSampler(),
+                                        renderEngine->getShadowPass()->getShadowMapPreviewView(),
+                                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                    );
+                                }
+
+                                if (shadowMapImGuiDescriptor != VK_NULL_HANDLE) {
+                                    float previewSize = ImGui::GetContentRegionAvail().x;
+                                    ImGui::Image(shadowMapImGuiDescriptor, ImVec2(previewSize, previewSize));
+                                }
+                            } else if (light.type == LightType::POINT) {
+                                // Cube map 6-face preview (3x2 grid)
+                                ImGui::Text("Cube Shadow Map Preview:");
+
+                                // Create ImGui descriptors for cube faces (lazy init)
+                                if (cubeFaceImGuiDescriptors[0] == VK_NULL_HANDLE) {
+                                    for (int face = 0; face < 6; face++) {
+                                        cubeFaceImGuiDescriptors[face] = ImGui_ImplVulkan_AddTexture(
+                                            renderEngine->getShadowPass()->getCubeShadowMapSampler(),
+                                            renderEngine->getShadowPass()->getCubeFacePreviewView(face),
+                                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                        );
+                                    }
+                                }
+
+                                const char* faceNames[] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z" };
+                                float availWidth = ImGui::GetContentRegionAvail().x;
+                                float faceSize = (availWidth - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
+
+                                for (int face = 0; face < 6; face++) {
+                                    if (face % 3 != 0) ImGui::SameLine();
+                                    ImGui::BeginGroup();
+                                    ImGui::Text("%s", faceNames[face]);
+                                    if (cubeFaceImGuiDescriptors[face] != VK_NULL_HANDLE) {
+                                        ImGui::Image(cubeFaceImGuiDescriptors[face], ImVec2(faceSize, faceSize));
+                                    }
+                                    ImGui::EndGroup();
+                                }
                             }
                         }
                     }
@@ -932,6 +967,13 @@ void ImGuiOverlay::cleanup(VkDevice device) {
     if (shadowMapImGuiDescriptor != VK_NULL_HANDLE) {
         ImGui_ImplVulkan_RemoveTexture(shadowMapImGuiDescriptor);
         shadowMapImGuiDescriptor = VK_NULL_HANDLE;
+    }
+
+    for (int face = 0; face < 6; face++) {
+        if (cubeFaceImGuiDescriptors[face] != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(cubeFaceImGuiDescriptors[face]);
+            cubeFaceImGuiDescriptors[face] = VK_NULL_HANDLE;
+        }
     }
 
     ImGui_ImplVulkan_Shutdown();

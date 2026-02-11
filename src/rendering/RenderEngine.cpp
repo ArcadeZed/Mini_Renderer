@@ -161,12 +161,17 @@ void RenderEngine::initVulkan() {
     shadowPass = std::make_unique<ShadowPass>();
     shadowPass->init(context.getDevice(), resource, command, *shaderManager, 4096);
 
-    // Update descriptor sets with shadow map (Binding 2 in Set 0)
-    // Layout must match shadow render pass finalLayout (DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+    // Update descriptor sets with shadow maps
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        // Binding 2: Directional shadow map (2D)
         descriptorManager->writeImage(descriptorSets[i], 2,
                                        shadowPass->getShadowMapView(),
                                        shadowPass->getShadowMapSampler(),
+                                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        // Binding 3: Cube shadow map (default: dummy cube)
+        descriptorManager->writeImage(descriptorSets[i], 3,
+                                       shadowPass->getDummyCubeView(),
+                                       shadowPass->getCubeShadowMapSampler(),
                                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     }
 
@@ -281,7 +286,13 @@ void RenderEngine::createDescriptorSetLayout() {
     shadowMapBinding.descriptorCount = 1;
     shadowMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    descriptorSetLayout = descriptorManager->createLayout({uboBinding, samplerBinding, shadowMapBinding});
+    VkDescriptorSetLayoutBinding cubeShadowMapBinding{};
+    cubeShadowMapBinding.binding = 3;
+    cubeShadowMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    cubeShadowMapBinding.descriptorCount = 1;
+    cubeShadowMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    descriptorSetLayout = descriptorManager->createLayout({uboBinding, samplerBinding, shadowMapBinding, cubeShadowMapBinding});
 
     // Set 1: Material Buffer SSBO + Texture Array (for PBR)
     VkDescriptorSetLayoutBinding materialBufferBinding{};
@@ -320,7 +331,7 @@ void RenderEngine::createDescriptorPool() {
 
     descriptorManager->createPool({
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT * 2 + MAX_MATERIAL_SETS + 128},  // +1 per frame for shadow map, +128 for texture array
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT * 3 + MAX_MATERIAL_SETS + 128},  // +2 per frame for shadow maps (2D + cube), +128 for texture array
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}  // Material buffer SSBO
     }, TOTAL_SETS);
 }
@@ -735,11 +746,16 @@ void RenderEngine::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
     }
 
     // Shadow Pass: Render scene from light's perspective (BEFORE main pass)
-    // Find first directional light with shadows enabled
+    // Only ONE shadow caster at a time (first enabled shadow-casting light wins)
     for (const Light& light : scene.lights) {
-        if (light.enabled && light.type == LightType::DIRECTIONAL && light.castsShadows) {
+        if (!light.enabled || !light.castsShadows) continue;
+        if (light.type == LightType::DIRECTIONAL) {
             shadowPass->record(cmd, scene, light);
-            break;  // Only render shadow map for first directional light
+            break;
+        }
+        if (light.type == LightType::POINT) {
+            shadowPass->recordCube(cmd, scene, light);
+            break;
         }
     }
 
@@ -828,6 +844,21 @@ void RenderEngine::drawFrame() {
 
     // Update light gizmo geometry if lights changed (rebuilds GPU buffers)
     debugRenderer->updateLightGizmos(scene, context.getDevice(), resource, command);
+
+    // Update binding 3: real cube shadow map if a point light casts shadows, else dummy
+    bool pointShadowActive = false;
+    for (const Light& light : scene.lights) {
+        if (light.enabled && light.castsShadows && light.type == LightType::POINT) {
+            pointShadowActive = true;
+            break;
+        }
+    }
+    VkImageView cubeView = pointShadowActive
+        ? shadowPass->getCubeShadowMapView()
+        : shadowPass->getDummyCubeView();
+    descriptorManager->writeImage(descriptorSets[currentFrame], 3,
+        cubeView, shadowPass->getCubeShadowMapSampler(),
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
     // Per-frame command buffer recording
     recordCommandBuffer(commandBuffers[imageIndex], imageIndex);

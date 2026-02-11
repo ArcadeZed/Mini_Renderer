@@ -104,6 +104,7 @@ struct GPULight {
         positionAndType = glm::vec4(light.position, static_cast<float>(light.type));
         colorAndIntensity = glm::vec4(light.color, light.intensity);
         directionAndRange = glm::vec4(glm::normalize(light.direction), light.range);
-        attenuation = glm::vec4(light.attenuationConstant, light.attenuationLinear, light.attenuationQuadratic, 0.0f);
+        attenuation = glm::vec4(light.attenuationConstant, light.attenuationLinear, light.attenuationQuadratic,
+                               light.castsShadows ? light.shadowFarPlane : 0.0f);  // w = shadowFarPlane (0 = no shadow)
     }
 };

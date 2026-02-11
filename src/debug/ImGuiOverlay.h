@@ -72,8 +72,9 @@ private:
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
     GLFWwindow* windowHandle = nullptr;
 
-    // Shadow map preview descriptor for ImGui::Image()
+    // Shadow map preview descriptors for ImGui::Image()
     VkDescriptorSet shadowMapImGuiDescriptor = VK_NULL_HANDLE;
+    VkDescriptorSet cubeFaceImGuiDescriptors[6] = {};
 
     // Content Browser state
     std::filesystem::path rootPath;

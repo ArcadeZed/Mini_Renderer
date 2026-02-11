@@ -14,7 +14,7 @@ struct GPULight {
     vec4 positionAndType;   // xyz = position, w = type (0=Point, 1=Directional, 2=Spot)
     vec4 colorAndIntensity; // rgb = color, a = intensity
     vec4 directionAndRange; // xyz = direction (normalized), w = range
-    vec4 attenuation;       // x = constant, y = linear, z = quadratic, w = unused
+    vec4 attenuation;       // x = constant, y = linear, z = quadratic, w = shadowFarPlane (0 = no shadow)
 };
 
 // Global uniform buffer (Set 0, Binding 0)
@@ -33,6 +33,8 @@ layout(set = 0, binding = 0) uniform UniformBufferObject {
 
 // Shadow map sampler (Set 0, Binding 2)
 layout(set = 0, binding = 2) uniform sampler2D shadowMap;
+// Cube shadow map sampler (Set 0, Binding 3)
+layout(set = 0, binding = 3) uniform samplerCube shadowCubeMap;
 
 // Material storage buffer (Set 1, Binding 0)
 struct GPUMaterial {
@@ -128,6 +130,33 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
         }
     }
     shadow /= 9.0;  // Average of 9 samples
+
+    return shadow;
+}
+
+// Point light shadow using cube map with 20-sample PCF
+// Returns 0.0 (fully shadowed) to 1.0 (fully lit)
+float calculatePointShadow(vec3 fragPos, vec3 lightPos, float farPlane) {
+    vec3 fragToLight = fragPos - lightPos;
+    float currentDepth = length(fragToLight) / farPlane;
+
+    // 20 offset directions for PCF on cube maps
+    vec3 offsets[20] = vec3[](
+        vec3( 1,  1,  1), vec3( 1, -1,  1), vec3(-1, -1,  1), vec3(-1,  1,  1),
+        vec3( 1,  1, -1), vec3( 1, -1, -1), vec3(-1, -1, -1), vec3(-1,  1, -1),
+        vec3( 1,  1,  0), vec3( 1, -1,  0), vec3(-1, -1,  0), vec3(-1,  1,  0),
+        vec3( 1,  0,  1), vec3(-1,  0,  1), vec3( 1,  0, -1), vec3(-1,  0, -1),
+        vec3( 0,  1,  1), vec3( 0, -1,  1), vec3( 0,  1, -1), vec3( 0, -1, -1)
+    );
+
+    float shadow = 0.0;
+    float bias = 0.002;
+    float diskRadius = 0.01;
+    for (int i = 0; i < 20; ++i) {
+        float closestDepth = texture(shadowCubeMap, fragToLight + offsets[i] * diskRadius).r;
+        shadow += currentDepth - bias > closestDepth ? 0.0 : 1.0;
+    }
+    shadow /= 20.0;
 
     return shadow;
 }
@@ -233,10 +262,12 @@ void main() {
         // Lambert diffuse
         vec3 diffuse = kD * baseColor / PI;
 
-        // Shadow calculation (only for directional lights for now)
+        // Shadow calculation
         float shadow = 1.0;  // Default: no shadow (fully lit)
         if (lightType == 1) {  // Directional Light
             shadow = calculateShadow(fragPosLightSpace, N, L);
+        } else if (lightType == 0 && light.attenuation.w > 0.0) {  // Point Light with shadow
+            shadow = calculatePointShadow(fragPos, light.positionAndType.xyz, light.attenuation.w);
         }
 
         // Accumulate this light's contribution (attenuated by shadow)
