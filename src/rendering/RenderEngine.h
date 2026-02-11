@@ -82,6 +82,9 @@ public:
     // Camera access (for input handling from main.cpp)
     Camera& getCamera() { return scene.camera; }
 
+    // Shadow pass access (for debug visualization in ImGui)
+    ShadowPass* getShadowPass() { return shadowPass.get(); }
+
     // Scene management
     Scene& getScene() { return scene; }
     int getSelectedObjectIndex() const { return selectedObjectIndex; }

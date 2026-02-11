@@ -2,6 +2,7 @@
 #include "../core/VulkanContext.h"
 #include "../scene/Scene.h"
 #include "../rendering/RenderEngine.h"
+#include "../rendering/ShadowPass.h"
 #include "../gizmo/GizmoState.h"
 
 #include <imgui.h>
@@ -535,6 +536,25 @@ void ImGuiOverlay::buildSceneManagerWindow(Scene& scene,
                             ImGui::DragFloat("Near Plane##Light", &light.shadowNearPlane, 0.1f, 0.01f, 100.0f, "%.2f");
                             ImGui::DragFloat("Far Plane##Light", &light.shadowFarPlane, 10.0f, 10.0f, 50000.0f, "%.1f");
                         }
+
+                        // Shadow Map Preview
+                        if (renderEngine && renderEngine->getShadowPass()) {
+                            ImGui::Separator();
+                            ImGui::Text("Shadow Map Preview:");
+
+                            if (shadowMapImGuiDescriptor == VK_NULL_HANDLE) {
+                                shadowMapImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
+                                    renderEngine->getShadowPass()->getShadowMapSampler(),
+                                    renderEngine->getShadowPass()->getShadowMapPreviewView(),
+                                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                );
+                            }
+
+                            if (shadowMapImGuiDescriptor != VK_NULL_HANDLE) {
+                                float previewSize = ImGui::GetContentRegionAvail().x;
+                                ImGui::Image(shadowMapImGuiDescriptor, ImVec2(previewSize, previewSize));
+                            }
+                        }
                     }
 
                     ImGui::TreePop();
@@ -909,6 +929,11 @@ void ImGuiOverlay::setupModernStyle() {
 }
 
 void ImGuiOverlay::cleanup(VkDevice device) {
+    if (shadowMapImGuiDescriptor != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(shadowMapImGuiDescriptor);
+        shadowMapImGuiDescriptor = VK_NULL_HANDLE;
+    }
+
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();

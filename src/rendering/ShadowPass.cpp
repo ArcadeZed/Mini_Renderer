@@ -59,6 +59,17 @@ void ShadowPass::createShadowResources() {
         throw std::runtime_error("Failed to create shadow map image view!");
     }
 
+    // Create grayscale preview view (R→RGB swizzle for ImGui display)
+    VkImageViewCreateInfo previewViewInfo = viewInfo;
+    previewViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+    previewViewInfo.components.g = VK_COMPONENT_SWIZZLE_R;
+    previewViewInfo.components.b = VK_COMPONENT_SWIZZLE_R;
+    previewViewInfo.components.a = VK_COMPONENT_SWIZZLE_ONE;
+
+    if (vkCreateImageView(device, &previewViewInfo, nullptr, &shadowMapPreviewView) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create shadow map preview view!");
+    }
+
     // Note: No initial layout transition needed - the render pass will handle it.
     // Image starts in UNDEFINED, render pass transitions to DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     // then to DEPTH_STENCIL_READ_ONLY_OPTIMAL for sampling in the main pass.
@@ -356,6 +367,10 @@ void ShadowPass::cleanup(VkDevice dev) {
     if (shadowMapSampler != VK_NULL_HANDLE) {
         vkDestroySampler(dev, shadowMapSampler, nullptr);
         shadowMapSampler = VK_NULL_HANDLE;
+    }
+    if (shadowMapPreviewView != VK_NULL_HANDLE) {
+        vkDestroyImageView(dev, shadowMapPreviewView, nullptr);
+        shadowMapPreviewView = VK_NULL_HANDLE;
     }
     if (shadowMapView != VK_NULL_HANDLE) {
         vkDestroyImageView(dev, shadowMapView, nullptr);

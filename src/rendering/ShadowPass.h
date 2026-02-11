@@ -34,6 +34,9 @@ public:
     VkImageView getShadowMapView() const { return shadowMapView; }
     VkSampler getShadowMapSampler() const { return shadowMapSampler; }
 
+    // Grayscale preview view (R→RGB swizzle for ImGui display)
+    VkImageView getShadowMapPreviewView() const { return shadowMapPreviewView; }
+
 private:
     void createShadowResources();
     void createShadowRenderPass();
@@ -52,6 +55,7 @@ private:
     VkImage shadowMapImage = VK_NULL_HANDLE;
     VkDeviceMemory shadowMapMemory = VK_NULL_HANDLE;
     VkImageView shadowMapView = VK_NULL_HANDLE;
+    VkImageView shadowMapPreviewView = VK_NULL_HANDLE;  // R→RGB swizzle for grayscale preview
     VkSampler shadowMapSampler = VK_NULL_HANDLE;
 
     // Shadow render pass and framebuffer
