@@ -9,6 +9,8 @@ class VulkanCommand;
 class Scene;
 struct Light;
 
+static constexpr int MAX_POINT_SHADOWS = 4;
+
 // Push constant for cube shadow pass (point lights)
 struct CubeShadowPushConstant {
     glm::mat4 faceVP;              // 64 bytes — per-face view-projection
@@ -37,9 +39,11 @@ public:
                 const Light& light);
 
     // Point light shadow (cube map, 6 faces)
+    // cubeIndex selects which cube map slot (0 to MAX_POINT_SHADOWS-1)
     void recordCube(VkCommandBuffer cmd,
                     const Scene& scene,
-                    const Light& light);
+                    const Light& light,
+                    int cubeIndex);
 
     void cleanup(VkDevice device);
 
@@ -48,11 +52,12 @@ public:
     VkSampler getShadowMapSampler() const { return shadowMapSampler; }
     VkImageView getShadowMapPreviewView() const { return shadowMapPreviewView; }
 
-    // Cube shadow map getters
-    VkImageView getCubeShadowMapView() const { return cubeShadowMapView; }
+    // Cube shadow map getters (indexed by cube slot)
+    VkImageView getCubeShadowMapView(int cubeIndex) const { return cubeShadowMapViews[cubeIndex]; }
     VkSampler getCubeShadowMapSampler() const { return cubeShadowMapSampler; }
     VkImageView getDummyCubeView() const { return dummyCubeView; }
-    VkImageView getCubeFacePreviewView(int face) const { return cubeFacePreviewViews[face]; }
+    VkImageView getCubeFacePreviewView(int cubeIndex, int face) const { return cubeFacePreviewViews[cubeIndex][face]; }
+    int getMaxPointShadows() const { return MAX_POINT_SHADOWS; }
 
 private:
     // Directional shadow setup
@@ -91,15 +96,15 @@ private:
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;
 
-    // Cube shadow map resources (point lights)
+    // Cube shadow map resources (point lights) — MAX_POINT_SHADOWS slots
     uint32_t cubeMapSize = 1024;
-    VkImage cubeShadowMapImage = VK_NULL_HANDLE;
-    VkDeviceMemory cubeShadowMapMemory = VK_NULL_HANDLE;
-    VkImageView cubeShadowMapView = VK_NULL_HANDLE;          // CUBE view for sampling
-    VkImageView cubeFaceViews[6] = {};                        // Per-face 2D views (framebuffer)
-    VkImageView cubeFacePreviewViews[6] = {};                 // Per-face R→RGB swizzle (ImGui)
+    VkImage cubeShadowMapImages[MAX_POINT_SHADOWS] = {};
+    VkDeviceMemory cubeShadowMapMemories[MAX_POINT_SHADOWS] = {};
+    VkImageView cubeShadowMapViews[MAX_POINT_SHADOWS] = {};                  // CUBE views for sampling
+    VkImageView cubeFaceViews[MAX_POINT_SHADOWS][6] = {};                    // Per-face 2D views (framebuffer)
+    VkImageView cubeFacePreviewViews[MAX_POINT_SHADOWS][6] = {};             // Per-face R→RGB swizzle (ImGui)
     VkSampler cubeShadowMapSampler = VK_NULL_HANDLE;
-    VkFramebuffer cubeFaceFramebuffers[6] = {};
+    VkFramebuffer cubeFaceFramebuffers[MAX_POINT_SHADOWS][6] = {};
 
     // Cube shadow pipeline (has fragment shader for linear depth)
     VkPipeline cubeShadowPipeline = VK_NULL_HANDLE;

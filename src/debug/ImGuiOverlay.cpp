@@ -561,32 +561,49 @@ void ImGuiOverlay::buildSceneManagerWindow(Scene& scene,
                                     ImGui::Image(shadowMapImGuiDescriptor, ImVec2(previewSize, previewSize));
                                 }
                             } else if (light.type == LightType::POINT) {
-                                // Cube map 6-face preview (3x2 grid)
-                                ImGui::Text("Cube Shadow Map Preview:");
-
-                                // Create ImGui descriptors for cube faces (lazy init)
-                                if (cubeFaceImGuiDescriptors[0] == VK_NULL_HANDLE) {
-                                    for (int face = 0; face < 6; face++) {
-                                        cubeFaceImGuiDescriptors[face] = ImGui_ImplVulkan_AddTexture(
-                                            renderEngine->getShadowPass()->getCubeShadowMapSampler(),
-                                            renderEngine->getShadowPass()->getCubeFacePreviewView(face),
-                                            VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                                        );
+                                // Determine cube map slot for this light
+                                int cubeSlot = -1;
+                                {
+                                    int slot = 0;
+                                    for (size_t li = 0; li < scene.lights.size() && slot < MAX_POINT_SHADOWS; li++) {
+                                        const Light& l = scene.lights[li];
+                                        if (!l.enabled || !l.castsShadows || l.type != LightType::POINT) continue;
+                                        if (li == i) { cubeSlot = slot; break; }
+                                        slot++;
                                     }
                                 }
 
-                                const char* faceNames[] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z" };
-                                float availWidth = ImGui::GetContentRegionAvail().x;
-                                float faceSize = (availWidth - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
+                                if (cubeSlot >= 0) {
+                                    // Cube map 6-face preview (3x2 grid)
+                                    ImGui::Text("Cube Shadow Map Preview (Slot %d):", cubeSlot);
 
-                                for (int face = 0; face < 6; face++) {
-                                    if (face % 3 != 0) ImGui::SameLine();
-                                    ImGui::BeginGroup();
-                                    ImGui::Text("%s", faceNames[face]);
-                                    if (cubeFaceImGuiDescriptors[face] != VK_NULL_HANDLE) {
-                                        ImGui::Image(cubeFaceImGuiDescriptors[face], ImVec2(faceSize, faceSize));
+                                    // Create ImGui descriptors for cube faces (lazy init)
+                                    if (cubeFaceImGuiDescriptors[cubeSlot][0] == VK_NULL_HANDLE) {
+                                        for (int face = 0; face < 6; face++) {
+                                            cubeFaceImGuiDescriptors[cubeSlot][face] = ImGui_ImplVulkan_AddTexture(
+                                                renderEngine->getShadowPass()->getCubeShadowMapSampler(),
+                                                renderEngine->getShadowPass()->getCubeFacePreviewView(cubeSlot, face),
+                                                VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                            );
+                                        }
                                     }
-                                    ImGui::EndGroup();
+
+                                    const char* faceNames[] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z" };
+                                    float availWidth = ImGui::GetContentRegionAvail().x;
+                                    float faceSize = (availWidth - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
+
+                                    for (int face = 0; face < 6; face++) {
+                                        if (face % 3 != 0) ImGui::SameLine();
+                                        ImGui::BeginGroup();
+                                        ImGui::Text("%s", faceNames[face]);
+                                        if (cubeFaceImGuiDescriptors[cubeSlot][face] != VK_NULL_HANDLE) {
+                                            ImGui::Image(cubeFaceImGuiDescriptors[cubeSlot][face], ImVec2(faceSize, faceSize));
+                                        }
+                                        ImGui::EndGroup();
+                                    }
+                                } else {
+                                    ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
+                                        "Max point shadows reached (%d/%d)", MAX_POINT_SHADOWS, MAX_POINT_SHADOWS);
                                 }
                             }
                         }
@@ -969,10 +986,12 @@ void ImGuiOverlay::cleanup(VkDevice device) {
         shadowMapImGuiDescriptor = VK_NULL_HANDLE;
     }
 
-    for (int face = 0; face < 6; face++) {
-        if (cubeFaceImGuiDescriptors[face] != VK_NULL_HANDLE) {
-            ImGui_ImplVulkan_RemoveTexture(cubeFaceImGuiDescriptors[face]);
-            cubeFaceImGuiDescriptors[face] = VK_NULL_HANDLE;
+    for (int ci = 0; ci < MAX_POINT_SHADOWS; ci++) {
+        for (int face = 0; face < 6; face++) {
+            if (cubeFaceImGuiDescriptors[ci][face] != VK_NULL_HANDLE) {
+                ImGui_ImplVulkan_RemoveTexture(cubeFaceImGuiDescriptors[ci][face]);
+                cubeFaceImGuiDescriptors[ci][face] = VK_NULL_HANDLE;
+            }
         }
     }
 

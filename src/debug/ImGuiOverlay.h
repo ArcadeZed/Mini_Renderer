@@ -74,7 +74,8 @@ private:
 
     // Shadow map preview descriptors for ImGui::Image()
     VkDescriptorSet shadowMapImGuiDescriptor = VK_NULL_HANDLE;
-    VkDescriptorSet cubeFaceImGuiDescriptors[6] = {};
+    static constexpr int MAX_POINT_SHADOWS = 4;
+    VkDescriptorSet cubeFaceImGuiDescriptors[MAX_POINT_SHADOWS][6] = {};
 
     // Content Browser state
     std::filesystem::path rootPath;

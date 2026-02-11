@@ -29,12 +29,14 @@ layout(set = 0, binding = 0) uniform UniformBufferObject {
     float roughness;        // Fallback if no material buffer
     GPULight lights[8];     // Array of lights
     mat4 lightSpaceMatrix;  // Light space transform for shadow mapping
+    ivec4 pointShadowIndicesA;  // Cube map index for GPU lights 0-3 (-1 = none)
+    ivec4 pointShadowIndicesB;  // Cube map index for GPU lights 4-7 (-1 = none)
 } ubo;
 
 // Shadow map sampler (Set 0, Binding 2)
 layout(set = 0, binding = 2) uniform sampler2D shadowMap;
-// Cube shadow map sampler (Set 0, Binding 3)
-layout(set = 0, binding = 3) uniform samplerCube shadowCubeMap;
+// Cube shadow map samplers (Set 0, Binding 3) — up to 4 point light shadow maps
+layout(set = 0, binding = 3) uniform samplerCube shadowCubeMaps[4];
 
 // Material storage buffer (Set 1, Binding 0)
 struct GPUMaterial {
@@ -136,7 +138,7 @@ float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
 
 // Point light shadow using cube map with 20-sample PCF
 // Returns 0.0 (fully shadowed) to 1.0 (fully lit)
-float calculatePointShadow(vec3 fragPos, vec3 lightPos, float farPlane) {
+float calculatePointShadow(vec3 fragPos, vec3 lightPos, float farPlane, int cubeIdx) {
     vec3 fragToLight = fragPos - lightPos;
     float currentDepth = length(fragToLight) / farPlane;
 
@@ -153,7 +155,7 @@ float calculatePointShadow(vec3 fragPos, vec3 lightPos, float farPlane) {
     float bias = 0.002;
     float diskRadius = 0.01;
     for (int i = 0; i < 20; ++i) {
-        float closestDepth = texture(shadowCubeMap, fragToLight + offsets[i] * diskRadius).r;
+        float closestDepth = texture(shadowCubeMaps[cubeIdx], fragToLight + offsets[i] * diskRadius).r;
         shadow += currentDepth - bias > closestDepth ? 0.0 : 1.0;
     }
     shadow /= 20.0;
@@ -267,7 +269,10 @@ void main() {
         if (lightType == 1) {  // Directional Light
             shadow = calculateShadow(fragPosLightSpace, N, L);
         } else if (lightType == 0 && light.attenuation.w > 0.0) {  // Point Light with shadow
-            shadow = calculatePointShadow(fragPos, light.positionAndType.xyz, light.attenuation.w);
+            int cubeIdx = (i < 4) ? ubo.pointShadowIndicesA[i] : ubo.pointShadowIndicesB[i - 4];
+            if (cubeIdx >= 0) {
+                shadow = calculatePointShadow(fragPos, light.positionAndType.xyz, light.attenuation.w, cubeIdx);
+            }
         }
 
         // Accumulate this light's contribution (attenuated by shadow)

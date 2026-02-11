@@ -12,8 +12,8 @@ void testGLTFLoader(RenderEngine& engine) {
     std::cout << "\n=== Loading Mech Drone with PBR ===" << std::endl;
 
     GLTFModel model;
-    //bool success = GLTFLoader::loadGLTF("main_sponza/NewSponza_Main_glTF_003.gltf", model);
-    bool success = GLTFLoader::loadGLTF("mech_drone/scene.gltf", model);
+    bool success = GLTFLoader::loadGLTF("main_sponza/NewSponza_Main_glTF_003.gltf", model);
+    //bool success = GLTFLoader::loadGLTF("mech_drone/scene.gltf", model);
 
 
     if (!success) {

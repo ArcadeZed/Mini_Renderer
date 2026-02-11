@@ -314,80 +314,85 @@ void ShadowPass::createShadowSampler() {
 // ============================================================================
 
 void ShadowPass::createCubeShadowResources() {
-    // Create cube map image (6 layers, D32_SFLOAT)
-    resource->createImage(cubeMapSize, cubeMapSize, 1,
-                         VK_FORMAT_D32_SFLOAT,
-                         VK_IMAGE_TILING_OPTIMAL,
-                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                         cubeShadowMapImage, cubeShadowMapMemory,
-                         6, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT);
+    for (int ci = 0; ci < MAX_POINT_SHADOWS; ci++) {
+        // Create cube map image (6 layers, D32_SFLOAT)
+        resource->createImage(cubeMapSize, cubeMapSize, 1,
+                             VK_FORMAT_D32_SFLOAT,
+                             VK_IMAGE_TILING_OPTIMAL,
+                             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                             cubeShadowMapImages[ci], cubeShadowMapMemories[ci],
+                             6, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT);
 
-    // Create CUBE image view (for sampling in main pass fragment shader)
-    VkImageViewCreateInfo cubeViewInfo{};
-    cubeViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    cubeViewInfo.image = cubeShadowMapImage;
-    cubeViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-    cubeViewInfo.format = VK_FORMAT_D32_SFLOAT;
-    cubeViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    cubeViewInfo.subresourceRange.baseMipLevel = 0;
-    cubeViewInfo.subresourceRange.levelCount = 1;
-    cubeViewInfo.subresourceRange.baseArrayLayer = 0;
-    cubeViewInfo.subresourceRange.layerCount = 6;
+        // Create CUBE image view (for sampling in main pass fragment shader)
+        VkImageViewCreateInfo cubeViewInfo{};
+        cubeViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        cubeViewInfo.image = cubeShadowMapImages[ci];
+        cubeViewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        cubeViewInfo.format = VK_FORMAT_D32_SFLOAT;
+        cubeViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        cubeViewInfo.subresourceRange.baseMipLevel = 0;
+        cubeViewInfo.subresourceRange.levelCount = 1;
+        cubeViewInfo.subresourceRange.baseArrayLayer = 0;
+        cubeViewInfo.subresourceRange.layerCount = 6;
 
-    if (vkCreateImageView(device, &cubeViewInfo, nullptr, &cubeShadowMapView) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create cube shadow map view!");
-    }
-
-    // Create per-face 2D views (for framebuffer attachments) + preview views (ImGui)
-    for (int face = 0; face < 6; face++) {
-        VkImageViewCreateInfo faceViewInfo{};
-        faceViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        faceViewInfo.image = cubeShadowMapImage;
-        faceViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        faceViewInfo.format = VK_FORMAT_D32_SFLOAT;
-        faceViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        faceViewInfo.subresourceRange.baseMipLevel = 0;
-        faceViewInfo.subresourceRange.levelCount = 1;
-        faceViewInfo.subresourceRange.baseArrayLayer = static_cast<uint32_t>(face);
-        faceViewInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(device, &faceViewInfo, nullptr, &cubeFaceViews[face]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create cube face view!");
+        if (vkCreateImageView(device, &cubeViewInfo, nullptr, &cubeShadowMapViews[ci]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create cube shadow map view!");
         }
 
-        // Preview view with R→RGB swizzle for grayscale ImGui display
-        VkImageViewCreateInfo previewInfo = faceViewInfo;
-        previewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
-        previewInfo.components.g = VK_COMPONENT_SWIZZLE_R;
-        previewInfo.components.b = VK_COMPONENT_SWIZZLE_R;
-        previewInfo.components.a = VK_COMPONENT_SWIZZLE_ONE;
+        // Create per-face 2D views (for framebuffer attachments) + preview views (ImGui)
+        for (int face = 0; face < 6; face++) {
+            VkImageViewCreateInfo faceViewInfo{};
+            faceViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            faceViewInfo.image = cubeShadowMapImages[ci];
+            faceViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            faceViewInfo.format = VK_FORMAT_D32_SFLOAT;
+            faceViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            faceViewInfo.subresourceRange.baseMipLevel = 0;
+            faceViewInfo.subresourceRange.levelCount = 1;
+            faceViewInfo.subresourceRange.baseArrayLayer = static_cast<uint32_t>(face);
+            faceViewInfo.subresourceRange.layerCount = 1;
 
-        if (vkCreateImageView(device, &previewInfo, nullptr, &cubeFacePreviewViews[face]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create cube face preview view!");
+            if (vkCreateImageView(device, &faceViewInfo, nullptr, &cubeFaceViews[ci][face]) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create cube face view!");
+            }
+
+            // Preview view with R→RGB swizzle for grayscale ImGui display
+            VkImageViewCreateInfo previewInfo = faceViewInfo;
+            previewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+            previewInfo.components.g = VK_COMPONENT_SWIZZLE_R;
+            previewInfo.components.b = VK_COMPONENT_SWIZZLE_R;
+            previewInfo.components.a = VK_COMPONENT_SWIZZLE_ONE;
+
+            if (vkCreateImageView(device, &previewInfo, nullptr, &cubeFacePreviewViews[ci][face]) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create cube face preview view!");
+            }
         }
     }
 
-    std::cout << "Cube shadow map resources created (" << cubeMapSize << "x" << cubeMapSize << " x6)." << std::endl;
+    std::cout << "Cube shadow map resources created (" << MAX_POINT_SHADOWS << "x "
+              << cubeMapSize << "x" << cubeMapSize << " x6)." << std::endl;
 }
 
 void ShadowPass::createCubeShadowFramebuffers() {
-    for (int face = 0; face < 6; face++) {
-        VkFramebufferCreateInfo fbInfo{};
-        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbInfo.renderPass = shadowRenderPass;
-        fbInfo.attachmentCount = 1;
-        fbInfo.pAttachments = &cubeFaceViews[face];
-        fbInfo.width = cubeMapSize;
-        fbInfo.height = cubeMapSize;
-        fbInfo.layers = 1;
+    for (int ci = 0; ci < MAX_POINT_SHADOWS; ci++) {
+        for (int face = 0; face < 6; face++) {
+            VkFramebufferCreateInfo fbInfo{};
+            fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fbInfo.renderPass = shadowRenderPass;
+            fbInfo.attachmentCount = 1;
+            fbInfo.pAttachments = &cubeFaceViews[ci][face];
+            fbInfo.width = cubeMapSize;
+            fbInfo.height = cubeMapSize;
+            fbInfo.layers = 1;
 
-        if (vkCreateFramebuffer(device, &fbInfo, nullptr, &cubeFaceFramebuffers[face]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create cube face framebuffer!");
+            if (vkCreateFramebuffer(device, &fbInfo, nullptr, &cubeFaceFramebuffers[ci][face]) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create cube face framebuffer!");
+            }
         }
     }
 
-    std::cout << "Cube shadow framebuffers created (6 faces)." << std::endl;
+    std::cout << "Cube shadow framebuffers created (" << MAX_POINT_SHADOWS << "x6 faces)." << std::endl;
 }
 
 void ShadowPass::createCubeShadowPipeline() {
@@ -618,7 +623,8 @@ void ShadowPass::createDummyCubeTexture() {
 
 void ShadowPass::recordCube(VkCommandBuffer cmd,
                             const Scene& scene,
-                            const Light& light) {
+                            const Light& light,
+                            int cubeIndex) {
     glm::vec3 lightPos = light.position;
     float farPlane = light.shadowFarPlane;
     float nearPlane = light.shadowNearPlane;
@@ -645,7 +651,7 @@ void ShadowPass::recordCube(VkCommandBuffer cmd,
         VkRenderPassBeginInfo rpInfo{};
         rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rpInfo.renderPass = shadowRenderPass;
-        rpInfo.framebuffer = cubeFaceFramebuffers[face];
+        rpInfo.framebuffer = cubeFaceFramebuffers[cubeIndex][face];
         rpInfo.renderArea.offset = {0, 0};
         rpInfo.renderArea.extent = {cubeMapSize, cubeMapSize};
 
@@ -731,7 +737,7 @@ void ShadowPass::record(VkCommandBuffer cmd,
 }
 
 void ShadowPass::cleanup(VkDevice dev) {
-    // Cube shadow resources
+    // Cube shadow resources (all MAX_POINT_SHADOWS slots)
     if (cubeShadowPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(dev, cubeShadowPipeline, nullptr);
         cubeShadowPipeline = VK_NULL_HANDLE;
@@ -740,37 +746,41 @@ void ShadowPass::cleanup(VkDevice dev) {
         vkDestroyPipelineLayout(dev, cubeShadowPipelineLayout, nullptr);
         cubeShadowPipelineLayout = VK_NULL_HANDLE;
     }
-    for (int i = 0; i < 6; i++) {
-        if (cubeFaceFramebuffers[i] != VK_NULL_HANDLE) {
-            vkDestroyFramebuffer(dev, cubeFaceFramebuffers[i], nullptr);
-            cubeFaceFramebuffers[i] = VK_NULL_HANDLE;
+    for (int ci = 0; ci < MAX_POINT_SHADOWS; ci++) {
+        for (int f = 0; f < 6; f++) {
+            if (cubeFaceFramebuffers[ci][f] != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(dev, cubeFaceFramebuffers[ci][f], nullptr);
+                cubeFaceFramebuffers[ci][f] = VK_NULL_HANDLE;
+            }
         }
     }
     if (cubeShadowMapSampler != VK_NULL_HANDLE) {
         vkDestroySampler(dev, cubeShadowMapSampler, nullptr);
         cubeShadowMapSampler = VK_NULL_HANDLE;
     }
-    for (int i = 0; i < 6; i++) {
-        if (cubeFacePreviewViews[i] != VK_NULL_HANDLE) {
-            vkDestroyImageView(dev, cubeFacePreviewViews[i], nullptr);
-            cubeFacePreviewViews[i] = VK_NULL_HANDLE;
+    for (int ci = 0; ci < MAX_POINT_SHADOWS; ci++) {
+        for (int f = 0; f < 6; f++) {
+            if (cubeFacePreviewViews[ci][f] != VK_NULL_HANDLE) {
+                vkDestroyImageView(dev, cubeFacePreviewViews[ci][f], nullptr);
+                cubeFacePreviewViews[ci][f] = VK_NULL_HANDLE;
+            }
+            if (cubeFaceViews[ci][f] != VK_NULL_HANDLE) {
+                vkDestroyImageView(dev, cubeFaceViews[ci][f], nullptr);
+                cubeFaceViews[ci][f] = VK_NULL_HANDLE;
+            }
         }
-        if (cubeFaceViews[i] != VK_NULL_HANDLE) {
-            vkDestroyImageView(dev, cubeFaceViews[i], nullptr);
-            cubeFaceViews[i] = VK_NULL_HANDLE;
+        if (cubeShadowMapViews[ci] != VK_NULL_HANDLE) {
+            vkDestroyImageView(dev, cubeShadowMapViews[ci], nullptr);
+            cubeShadowMapViews[ci] = VK_NULL_HANDLE;
         }
-    }
-    if (cubeShadowMapView != VK_NULL_HANDLE) {
-        vkDestroyImageView(dev, cubeShadowMapView, nullptr);
-        cubeShadowMapView = VK_NULL_HANDLE;
-    }
-    if (cubeShadowMapImage != VK_NULL_HANDLE) {
-        vkDestroyImage(dev, cubeShadowMapImage, nullptr);
-        cubeShadowMapImage = VK_NULL_HANDLE;
-    }
-    if (cubeShadowMapMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(dev, cubeShadowMapMemory, nullptr);
-        cubeShadowMapMemory = VK_NULL_HANDLE;
+        if (cubeShadowMapImages[ci] != VK_NULL_HANDLE) {
+            vkDestroyImage(dev, cubeShadowMapImages[ci], nullptr);
+            cubeShadowMapImages[ci] = VK_NULL_HANDLE;
+        }
+        if (cubeShadowMapMemories[ci] != VK_NULL_HANDLE) {
+            vkFreeMemory(dev, cubeShadowMapMemories[ci], nullptr);
+            cubeShadowMapMemories[ci] = VK_NULL_HANDLE;
+        }
     }
 
     // Dummy cube

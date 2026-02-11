@@ -36,6 +36,8 @@ struct UniformBufferObject {
     alignas(4) float roughness;  // PBR: 0 = smooth, 1 = rough
     GPULight lights[8];  // Array of lights (max 8)
     alignas(16) glm::mat4 lightSpaceMatrix;  // Light space transform for shadow mapping (first directional light)
+    alignas(16) glm::ivec4 pointShadowIndicesA;  // Cube map index for GPU lights 0-3 (-1 = no cube shadow)
+    alignas(16) glm::ivec4 pointShadowIndicesB;  // Cube map index for GPU lights 4-7 (-1 = no cube shadow)
 };
 
 // Push constants for per-object data (model matrix + material index)
