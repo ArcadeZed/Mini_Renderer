@@ -15,6 +15,7 @@
 #include "core/VulkanCommand.h"
 #include "core/VulkanResource.h"
 #include "scene/Scene.h"
+#include "scene/Light.h"
 #include "debug/ImGuiOverlay.h"
 #include "gizmo/GizmoState.h"
 
@@ -22,21 +23,19 @@ class ShaderManager;
 class DescriptorManager;
 class ForwardPass;
 class DebugRenderer;
+class ShadowPass;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
-    alignas(16) glm::vec3 lightPos;
-    alignas(16) glm::vec3 lightColor;
     alignas(16) glm::vec3 viewPos;
+    alignas(4) int lightCount;  // Number of active lights (0-8)
     alignas(4) float ambientStrength;
     alignas(4) float shininess;
-    alignas(4) float lightIntensity;
-    alignas(4) float attenuationConstant;
-    alignas(4) float attenuationLinear;
-    alignas(4) float attenuationQuadratic;
     alignas(4) float metalness;  // PBR: 0 = dielectric, 1 = metal
     alignas(4) float roughness;  // PBR: 0 = smooth, 1 = rough
+    GPULight lights[8];  // Array of lights (max 8)
+    alignas(16) glm::mat4 lightSpaceMatrix;  // Light space transform for shadow mapping (first directional light)
 };
 
 // Push constants for per-object data (model matrix + material index)
@@ -145,6 +144,7 @@ private:
     std::unique_ptr<ForwardPass> forwardPass;
     std::unique_ptr<DebugRenderer> debugRenderer;
     std::unique_ptr<ImGuiOverlay> imguiOverlay;
+    std::unique_ptr<ShadowPass> shadowPass;
 
     // PBR asset managers
     std::unique_ptr<class TextureManager> textureManager;

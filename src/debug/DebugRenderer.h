@@ -24,15 +24,21 @@ public:
               VulkanCommand& command);
 
     void record(VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
-                bool drawGrid, bool drawAxes);
+                const class Scene& scene,
+                bool drawGrid, bool drawAxes, bool drawLightGizmos);
 
     void cleanup(VkDevice device);
 
     // Update swapchain extent and rebuild pipelines (for window resize)
     void updateExtent(VkExtent2D newExtent);
 
+    // Rebuild light gizmo geometry from scene lights (call before record)
+    void updateLightGizmos(const class Scene& scene, VkDevice device,
+                           class VulkanResource& resource, class VulkanCommand& command);
+
 private:
     void buildDebugGeometry();
+    void buildLightGizmoGeometry(const class Scene& scene);
     void createDebugPipeline(VkDevice device, ShaderManager& shaderManager,
                              VkExtent2D extent, VkDescriptorSetLayout layout,
                              VkRenderPass renderPass);
@@ -41,6 +47,7 @@ private:
                             VkRenderPass renderPass);
 
     Mesh debugMesh;
+    Mesh lightGizmoMesh;
 
     VkPipeline debugPipeline = VK_NULL_HANDLE;
     VkPipelineLayout debugPipelineLayout = VK_NULL_HANDLE;

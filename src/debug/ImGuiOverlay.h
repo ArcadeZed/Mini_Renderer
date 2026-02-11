@@ -38,6 +38,7 @@ struct ImGuiParams {
     // Debug visualization toggles
     bool showDebugAxes = true;
     bool showGrid = true;
+    bool showLightGizmos = true;
 };
 
 class ImGuiOverlay {

@@ -3,6 +3,7 @@
 #include "../core/PipelineBuilder.h"
 #include "../core/VulkanResource.h"
 #include "../core/VulkanCommand.h"
+#include "../scene/Scene.h"
 #include <iostream>
 #include <string>
 
@@ -59,6 +60,135 @@ void DebugRenderer::buildDebugGeometry() {
     std::cout << "DebugRenderer: Debug geometry built (lines for geometry shader)." << std::endl;
 }
 
+void DebugRenderer::buildLightGizmoGeometry(const Scene& scene) {
+    std::vector<Vertex> lightVerts;
+    std::vector<uint32_t> lightInds;
+    uint32_t indexOffset = 0;
+
+    for (const auto& light : scene.lights) {
+        if (light.type == LightType::DIRECTIONAL) {
+            // Directional Light: Draw arrow from light.position pointing in direction
+            glm::vec3 sceneCenter(0.0f, 0.0f, 0.0f);
+            glm::vec3 startPos = light.position;  // Start at the light source position
+            glm::vec3 endPos = sceneCenter;        // Point toward scene center
+
+            // Yellow color for directional lights
+            glm::vec3 color(1.0f, 1.0f, 0.0f);
+
+            // Arrow shaft
+            lightVerts.push_back({startPos, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightVerts.push_back({endPos, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightInds.push_back(indexOffset);
+            lightInds.push_back(indexOffset + 1);
+            indexOffset += 2;
+
+            // Arrow head (simple cone as 3 lines)
+            glm::vec3 dir = glm::normalize(light.direction);
+            glm::vec3 perpendicular1 = glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f)));
+            if (glm::length(perpendicular1) < 0.01f) {
+                perpendicular1 = glm::normalize(glm::cross(dir, glm::vec3(1.0f, 0.0f, 0.0f)));
+            }
+            glm::vec3 perpendicular2 = glm::normalize(glm::cross(dir, perpendicular1));
+
+            float arrowHeadSize = 2.0f;
+            glm::vec3 arrowBase = endPos - dir * arrowHeadSize;
+            glm::vec3 arrowTip1 = arrowBase + perpendicular1 * arrowHeadSize * 0.5f;
+            glm::vec3 arrowTip2 = arrowBase - perpendicular1 * arrowHeadSize * 0.5f;
+            glm::vec3 arrowTip3 = arrowBase + perpendicular2 * arrowHeadSize * 0.5f;
+
+            lightVerts.push_back({endPos, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightVerts.push_back({arrowTip1, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightInds.push_back(indexOffset);
+            lightInds.push_back(indexOffset + 1);
+            indexOffset += 2;
+
+            lightVerts.push_back({endPos, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightVerts.push_back({arrowTip2, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightInds.push_back(indexOffset);
+            lightInds.push_back(indexOffset + 1);
+            indexOffset += 2;
+
+            lightVerts.push_back({endPos, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightVerts.push_back({arrowTip3, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+            lightInds.push_back(indexOffset);
+            lightInds.push_back(indexOffset + 1);
+            indexOffset += 2;
+
+        } else if (light.type == LightType::POINT) {
+            // Point Light: Draw wireframe sphere at position
+            glm::vec3 center = light.position;
+            float radius = 1.0f;
+
+            // Orange color for point lights
+            glm::vec3 color(1.0f, 0.7f, 0.0f);
+
+            // Simple sphere approximation: 3 orthogonal circles (XY, XZ, YZ planes)
+            const int segments = 16;
+
+            // XY plane circle
+            for (int i = 0; i < segments; ++i) {
+                float angle1 = (float)i / segments * 2.0f * glm::pi<float>();
+                float angle2 = (float)(i + 1) / segments * 2.0f * glm::pi<float>();
+
+                glm::vec3 p1 = center + glm::vec3(cos(angle1) * radius, sin(angle1) * radius, 0.0f);
+                glm::vec3 p2 = center + glm::vec3(cos(angle2) * radius, sin(angle2) * radius, 0.0f);
+
+                lightVerts.push_back({p1, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+                lightVerts.push_back({p2, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+                lightInds.push_back(indexOffset);
+                lightInds.push_back(indexOffset + 1);
+                indexOffset += 2;
+            }
+
+            // XZ plane circle
+            for (int i = 0; i < segments; ++i) {
+                float angle1 = (float)i / segments * 2.0f * glm::pi<float>();
+                float angle2 = (float)(i + 1) / segments * 2.0f * glm::pi<float>();
+
+                glm::vec3 p1 = center + glm::vec3(cos(angle1) * radius, 0.0f, sin(angle1) * radius);
+                glm::vec3 p2 = center + glm::vec3(cos(angle2) * radius, 0.0f, sin(angle2) * radius);
+
+                lightVerts.push_back({p1, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+                lightVerts.push_back({p2, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+                lightInds.push_back(indexOffset);
+                lightInds.push_back(indexOffset + 1);
+                indexOffset += 2;
+            }
+
+            // YZ plane circle
+            for (int i = 0; i < segments; ++i) {
+                float angle1 = (float)i / segments * 2.0f * glm::pi<float>();
+                float angle2 = (float)(i + 1) / segments * 2.0f * glm::pi<float>();
+
+                glm::vec3 p1 = center + glm::vec3(0.0f, cos(angle1) * radius, sin(angle1) * radius);
+                glm::vec3 p2 = center + glm::vec3(0.0f, cos(angle2) * radius, sin(angle2) * radius);
+
+                lightVerts.push_back({p1, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+                lightVerts.push_back({p2, color, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f}});
+                lightInds.push_back(indexOffset);
+                lightInds.push_back(indexOffset + 1);
+                indexOffset += 2;
+            }
+        }
+    }
+
+    lightGizmoMesh.setGeometry(std::move(lightVerts), std::move(lightInds));
+}
+
+void DebugRenderer::updateLightGizmos(const Scene& scene, VkDevice device,
+                                      VulkanResource& resource, VulkanCommand& command) {
+    // Cleanup old gizmo mesh
+    lightGizmoMesh.cleanup(device);
+
+    // Rebuild geometry from current scene lights
+    buildLightGizmoGeometry(scene);
+
+    // Upload to GPU
+    if (lightGizmoMesh.getIndexCount() > 0) {
+        lightGizmoMesh.upload(device, resource, command);
+    }
+}
+
 void DebugRenderer::createDebugPipeline(VkDevice device, ShaderManager& shaderManager,
                                          VkExtent2D extent, VkDescriptorSetLayout layout,
                                          VkRenderPass renderPass) {
@@ -113,7 +243,8 @@ void DebugRenderer::createGridPipeline(VkDevice device, ShaderManager& shaderMan
 }
 
 void DebugRenderer::record(VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
-                           bool drawGrid, bool drawAxes) {
+                           const class Scene& scene,
+                           bool drawGrid, bool drawAxes, bool drawLightGizmos) {
     // Draw 1: Infinite Grid (procedural, depth-aware)
     if (drawGrid) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gridPipeline);
@@ -144,10 +275,34 @@ void DebugRenderer::record(VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
         debugMesh.bind(cmd);
         debugMesh.draw(cmd);
     }
+
+    // Draw 3: Light Gizmos (visual indicators for light positions/directions)
+    if (drawLightGizmos && lightGizmoMesh.getIndexCount() > 0) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, debugPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                debugPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
+        // Push constants: viewport size + line width
+        struct {
+            float viewportWidth;
+            float viewportHeight;
+            float lineWidth;
+        } pushConstants;
+        pushConstants.viewportWidth = static_cast<float>(swapchainExtent.width);
+        pushConstants.viewportHeight = static_cast<float>(swapchainExtent.height);
+        pushConstants.lineWidth = 2.0f;  // Slightly thinner than axes
+
+        vkCmdPushConstants(cmd, debugPipelineLayout, VK_SHADER_STAGE_GEOMETRY_BIT,
+                           0, sizeof(pushConstants), &pushConstants);
+
+        lightGizmoMesh.bind(cmd);
+        lightGizmoMesh.draw(cmd);
+    }
 }
 
 void DebugRenderer::cleanup(VkDevice device) {
     debugMesh.cleanup(device);
+    lightGizmoMesh.cleanup(device);
 
     if (debugPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, debugPipeline, nullptr);

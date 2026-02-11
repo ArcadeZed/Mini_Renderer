@@ -233,6 +233,7 @@ void ImGuiOverlay::buildUI(ImGuiParams& params, class Scene& scene, int& selecte
         ImGui::PopStyleColor();
         ImGui::Checkbox("Show Axes", &params.showDebugAxes);
         ImGui::Checkbox("Show Grid", &params.showGrid);
+        ImGui::Checkbox("Show Light Gizmos", &params.showLightGizmos);
     } else {
         ImGui::PopStyleColor();
     }
@@ -364,6 +365,204 @@ void ImGuiOverlay::buildSceneManagerWindow(Scene& scene,
             ImGui::DragFloat3("Position##Object", &transform.position.x, 0.1f);
             ImGui::DragFloat3("Rotation##Object", &transform.rotation.x, 1.0f);
             ImGui::DragFloat3("Scale##Object", &transform.scale.x, 0.01f);
+        }
+    } else {
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ======= SECTION 3: Lights =======
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+    if (ImGui::CollapsingHeader("Lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PopStyleColor();
+
+        ImGui::Text("Active Lights: %zu / 8", scene.lights.size());
+        ImGui::Separator();
+
+        // Add Light button
+        if (ImGui::Button(ICON_FA_CIRCLE_PLUS " Add Light", ImVec2(-1, 0))) {
+            if (scene.lights.size() < 8) {
+                Light newLight;
+                newLight.name = "Light_" + std::to_string(scene.lights.size());
+                newLight.type = LightType::POINT;
+                newLight.position = glm::vec3(0.0f, 10.0f, 0.0f);
+                newLight.color = glm::vec3(1.0f, 1.0f, 1.0f);
+                newLight.intensity = 50.0f;
+                newLight.range = 100.0f;
+                newLight.enabled = true;
+                scene.lights.push_back(newLight);
+            }
+        }
+
+        ImGui::Spacing();
+
+        // List all lights
+        for (size_t i = 0; i < scene.lights.size(); i++) {
+            ImGui::PushID(static_cast<int>(i));
+
+            Light& light = scene.lights[i];
+
+            // Light header with enable checkbox
+            ImGui::Checkbox("##LightEnabled", &light.enabled);
+            ImGui::SameLine();
+
+            // Collapsing header for this light
+            std::string headerLabel = light.name + " (" +
+                (light.type == LightType::POINT ? "Point" :
+                 light.type == LightType::DIRECTIONAL ? "Directional" : "Spot") + ")";
+
+            if (ImGui::CollapsingHeader(headerLabel.c_str())) {
+                ImGui::Indent();
+
+                // Light name
+                char nameBuffer[64];
+                strncpy(nameBuffer, light.name.c_str(), sizeof(nameBuffer) - 1);
+                nameBuffer[sizeof(nameBuffer) - 1] = '\0';
+                if (ImGui::InputText("Name##Light", nameBuffer, sizeof(nameBuffer))) {
+                    light.name = std::string(nameBuffer);
+                }
+
+                // Light type
+                const char* lightTypes[] = { "Point", "Directional", "Spot" };
+                int currentType = static_cast<int>(light.type);
+                if (ImGui::Combo("Type##Light", &currentType, lightTypes, 3)) {
+                    light.type = static_cast<LightType>(currentType);
+                }
+
+                ImGui::Separator();
+
+                // Position
+                if (light.type == LightType::POINT || light.type == LightType::SPOT) {
+                    // Point/Spot lights: Position is the actual light location
+                    ImGui::DragFloat3("Position##Light", &light.position.x, 0.5f);
+                } else if (light.type == LightType::DIRECTIONAL) {
+                    // Directional lights: Position defines where the light "comes from"
+                    // Direction is auto-calculated as: sceneCenter - position
+                    glm::vec3 sceneCenter(0.0f, 0.0f, 0.0f);
+                    if (ImGui::DragFloat3("Light Source Position##Light", &light.position.x, 0.5f)) {
+                        // Auto-calculate direction: from position toward scene center
+                        light.direction = glm::normalize(sceneCenter - light.position);
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Position where the light comes from (direction is auto-calculated toward scene center)");
+                    }
+                }
+
+                // Direction (manual override for Directional/Spot lights)
+                if (light.type == LightType::DIRECTIONAL || light.type == LightType::SPOT) {
+                    // Show computed direction (read-only display)
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+                    ImGui::Text("Direction (computed): (%.3f, %.3f, %.3f)",
+                               light.direction.x, light.direction.y, light.direction.z);
+                    ImGui::PopStyleColor();
+
+                    // Optional: Manual direction override (collapsed by default)
+                    if (ImGui::TreeNode("Manual Direction Override")) {
+                        if (ImGui::DragFloat3("Direction##LightManual", &light.direction.x, 0.01f)) {
+                            // Auto-normalize direction after manual editing
+                            light.direction = glm::normalize(light.direction);
+                        }
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip("Manually override direction (usually not needed - position is easier)");
+                        }
+                        ImGui::TreePop();
+                    }
+
+                    // For directional lights, show computed shadow frustum position (read-only)
+                    if (light.type == LightType::DIRECTIONAL && light.castsShadows) {
+                        glm::vec3 shadowPos = -glm::normalize(light.direction) * light.shadowFarPlane * 0.5f;
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+                        ImGui::Text("Shadow Frustum Position: (%.1f, %.1f, %.1f)",
+                                   shadowPos.x, shadowPos.y, shadowPos.z);
+                        ImGui::PopStyleColor();
+                    }
+                }
+
+                ImGui::Separator();
+
+                // Color
+                ImGui::ColorEdit3("Color##Light", &light.color.x);
+
+                // Intensity
+                ImGui::SliderFloat("Intensity##Light", &light.intensity, 0.0f, 500.0f, "%.1f");
+
+                ImGui::Separator();
+
+                // Attenuation (for Point/Spot lights)
+                if (light.type == LightType::POINT || light.type == LightType::SPOT) {
+                    ImGui::Text("Attenuation:");
+                    ImGui::SliderFloat("Range##Light", &light.range, 1.0f, 500.0f, "%.1f");
+                    ImGui::SliderFloat("Constant##Light", &light.attenuationConstant, 0.0f, 2.0f, "%.3f");
+                    ImGui::SliderFloat("Linear##Light", &light.attenuationLinear, 0.0f, 1.0f, "%.4f");
+                    ImGui::SliderFloat("Quadratic##Light", &light.attenuationQuadratic, 0.0f, 0.5f, "%.4f");
+                }
+
+                ImGui::Separator();
+
+                // Shadow Properties
+                if (ImGui::TreeNode("Shadow Settings")) {
+                    ImGui::Checkbox("Cast Shadows##Light", &light.castsShadows);
+
+                    if (light.castsShadows) {
+                        ImGui::DragFloat("Shadow Bias##Light", &light.shadowBias, 0.0001f, 0.0f, 0.1f, "%.4f");
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip("Depth bias to prevent shadow acne");
+                        }
+
+                        // Shadow map resolution
+                        int resolutions[] = { 512, 1024, 2048, 4096 };
+                        const char* resolutionLabels[] = { "512x512", "1024x1024", "2048x2048", "4096x4096" };
+                        int currentResIdx = 1;  // Default 1024
+                        for (int j = 0; j < 4; j++) {
+                            if (light.shadowMapResolution == resolutions[j]) {
+                                currentResIdx = j;
+                                break;
+                            }
+                        }
+                        if (ImGui::Combo("Shadow Map Resolution##Light", &currentResIdx, resolutionLabels, 4)) {
+                            light.shadowMapResolution = resolutions[currentResIdx];
+                        }
+
+                        // Directional light specific
+                        if (light.type == LightType::DIRECTIONAL) {
+                            ImGui::DragFloat("Ortho Size##Light", &light.shadowOrthoSize, 1.0f, 1.0f, 5000.0f, "%.1f");
+                            if (ImGui::IsItemHovered()) {
+                                ImGui::SetTooltip("Size of shadow frustum coverage");
+                            }
+                            ImGui::DragFloat("Near Plane##Light", &light.shadowNearPlane, 0.1f, 0.01f, 100.0f, "%.2f");
+                            ImGui::DragFloat("Far Plane##Light", &light.shadowFarPlane, 10.0f, 10.0f, 50000.0f, "%.1f");
+                        }
+                    }
+
+                    ImGui::TreePop();
+                }
+
+                ImGui::Separator();
+
+                // Delete button
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
+                if (ImGui::Button("Delete Light", ImVec2(-1, 0))) {
+                    scene.lights.erase(scene.lights.begin() + i);
+                    ImGui::PopStyleColor(2);
+                    ImGui::Unindent();
+                    ImGui::PopID();
+                    break;  // Exit loop after deletion to avoid iterator invalidation
+                }
+                ImGui::PopStyleColor(2);
+
+                ImGui::Unindent();
+            }
+
+            ImGui::PopID();
+            ImGui::Spacing();
+        }
+
+        if (scene.lights.empty()) {
+            ImGui::TextWrapped("No lights in scene. Add one to see objects!");
         }
     } else {
         ImGui::PopStyleColor();

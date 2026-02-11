@@ -13,6 +13,7 @@
 #include "MaterialManager.h"
 #include "../debug/DebugRenderer.h"
 #include "../debug/ImGuiOverlay.h"
+#include "ShadowPass.h"
 #include <stdexcept>
 #include <iostream>
 #include <vector>
@@ -157,6 +158,18 @@ void RenderEngine::initVulkan() {
                         swapchain.getExtent(), descriptorSetLayout, renderPass,
                         resource, command);
 
+    shadowPass = std::make_unique<ShadowPass>();
+    shadowPass->init(context.getDevice(), resource, command, *shaderManager, 4096);
+
+    // Update descriptor sets with shadow map (Binding 2 in Set 0)
+    // Layout must match shadow render pass finalLayout (DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        descriptorManager->writeImage(descriptorSets[i], 2,
+                                       shadowPass->getShadowMapView(),
+                                       shadowPass->getShadowMapSampler(),
+                                       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+    }
+
     imguiOverlay = std::make_unique<ImGuiOverlay>();
     imguiOverlay->init(window, context, renderPass,
                        static_cast<uint32_t>(swapchain.getImages().size()));
@@ -166,6 +179,19 @@ void RenderEngine::initVulkan() {
                                    static_cast<uint32_t>(swapchainFramebuffers.size()));
 
     createSyncObjects();
+
+    // Initialize scene with a default directional light (supports shadow mapping)
+    Light defaultLight;
+    defaultLight.name = "Sun";
+    defaultLight.type = LightType::DIRECTIONAL;
+    defaultLight.direction = glm::vec3(-0.5f, -1.0f, -0.5f);  // Angled sun direction
+    defaultLight.color = glm::vec3(1.0f, 1.0f, 1.0f);  // White light
+    defaultLight.intensity = 1.0f;
+    defaultLight.castsShadows = true;
+    defaultLight.enabled = true;
+    scene.lights.push_back(defaultLight);
+
+    std::cout << "Default light added to scene." << std::endl;
 }
 
 // ============================================================================
@@ -249,7 +275,13 @@ void RenderEngine::createDescriptorSetLayout() {
     samplerBinding.descriptorCount = 1;
     samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    descriptorSetLayout = descriptorManager->createLayout({uboBinding, samplerBinding});
+    VkDescriptorSetLayoutBinding shadowMapBinding{};
+    shadowMapBinding.binding = 2;
+    shadowMapBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    shadowMapBinding.descriptorCount = 1;
+    shadowMapBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    descriptorSetLayout = descriptorManager->createLayout({uboBinding, samplerBinding, shadowMapBinding});
 
     // Set 1: Material Buffer SSBO + Texture Array (for PBR)
     VkDescriptorSetLayoutBinding materialBufferBinding{};
@@ -288,7 +320,7 @@ void RenderEngine::createDescriptorPool() {
 
     descriptorManager->createPool({
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 128},  // +128 for texture array
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT * 2 + MAX_MATERIAL_SETS + 128},  // +1 per frame for shadow map, +128 for texture array
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}  // Material buffer SSBO
     }, TOTAL_SETS);
 }
@@ -328,17 +360,30 @@ void RenderEngine::updateUniformBuffer(uint32_t currentImage) {
     ubo.proj = scene.camera.getProjectionMatrix();
     ubo.viewPos = scene.camera.getPosition();
 
-    // Read from ImGui interactive params
-    ubo.lightPos = imguiParams.lightPos;
-    ubo.lightColor = imguiParams.lightColor;
+    // Material parameters (from ImGui params)
     ubo.ambientStrength = imguiParams.ambientStrength;
     ubo.shininess = imguiParams.shininess;
-    ubo.lightIntensity = imguiParams.lightIntensity;
-    ubo.attenuationConstant = imguiParams.attenuationConstant;
-    ubo.attenuationLinear = imguiParams.attenuationLinear;
-    ubo.attenuationQuadratic = imguiParams.attenuationQuadratic;
     ubo.metalness = imguiParams.metalness;
     ubo.roughness = imguiParams.roughness;
+
+    // Populate lights array from scene (max 8 lights)
+    ubo.lightCount = 0;
+    for (size_t i = 0; i < scene.lights.size() && i < 8; ++i) {
+        const Light& light = scene.lights[i];
+        if (!light.enabled) continue;  // Skip disabled lights
+
+        ubo.lights[ubo.lightCount] = GPULight(light);
+        ubo.lightCount++;
+    }
+
+    // Calculate light space matrix from first directional light with shadows enabled
+    ubo.lightSpaceMatrix = glm::mat4(1.0f);  // Default identity
+    for (const Light& light : scene.lights) {
+        if (light.enabled && light.type == LightType::DIRECTIONAL && light.castsShadows) {
+            ubo.lightSpaceMatrix = light.getLightSpaceMatrix();
+            break;  // Use first directional shadow caster
+        }
+    }
 
     void* data;
     vkMapMemory(context.getDevice(), uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
@@ -689,6 +734,15 @@ void RenderEngine::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
         throw std::runtime_error("Failed to begin recording command buffer!");
     }
 
+    // Shadow Pass: Render scene from light's perspective (BEFORE main pass)
+    // Find first directional light with shadows enabled
+    for (const Light& light : scene.lights) {
+        if (light.enabled && light.type == LightType::DIRECTIONAL && light.castsShadows) {
+            shadowPass->record(cmd, scene, light);
+            break;  // Only render shadow map for first directional light
+        }
+    }
+
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass = renderPass;
@@ -711,9 +765,10 @@ void RenderEngine::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
                         pbrDescriptorSets.empty() ? VK_NULL_HANDLE : pbrDescriptorSets[0],
                         scene);
 
-    // 2. Debug visualization (grid + axes) - conditional on ImGui toggles
+    // 2. Debug visualization (grid + axes + light gizmos) - conditional on ImGui toggles
     debugRenderer->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT],
-                          imguiParams.showGrid, imguiParams.showDebugAxes);
+                          scene,
+                          imguiParams.showGrid, imguiParams.showDebugAxes, imguiParams.showLightGizmos);
 
     // 3. ImGui overlay (renders on top)
     imguiOverlay->record(cmd);
@@ -770,6 +825,9 @@ void RenderEngine::drawFrame() {
 
         previousLightingModelIndex = imguiParams.lightingModelIndex;
     }
+
+    // Update light gizmo geometry if lights changed (rebuilds GPU buffers)
+    debugRenderer->updateLightGizmos(scene, context.getDevice(), resource, command);
 
     // Per-frame command buffer recording
     recordCommandBuffer(commandBuffers[imageIndex], imageIndex);
@@ -866,6 +924,7 @@ void RenderEngine::cleanup() {
     imguiOverlay->cleanup(context.getDevice());
     debugRenderer->cleanup(context.getDevice());
     forwardPass->cleanup(context.getDevice());
+    shadowPass->cleanup(context.getDevice());
 
     // Sync objects
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {

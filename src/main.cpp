@@ -13,6 +13,8 @@ void testGLTFLoader(RenderEngine& engine) {
 
     GLTFModel model;
     bool success = GLTFLoader::loadGLTF("main_sponza/NewSponza_Main_glTF_003.gltf", model);
+    //bool success = GLTFLoader::loadGLTF("mech_drone/scene.gltf", model);
+
 
     if (!success) {
         std::cerr << "[FAILED] Could not load glTF file!" << std::endl;

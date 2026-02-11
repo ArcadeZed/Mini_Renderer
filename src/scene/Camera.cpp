@@ -91,7 +91,7 @@ glm::mat4 Camera::getViewMatrix() const {
 }
 
 glm::mat4 Camera::getProjectionMatrix() const {
-    auto proj = glm::perspective(glm::radians(fov), aspectRatio, nearPlane, farPlane);
+    auto proj = glm::perspectiveRH_ZO(glm::radians(fov), aspectRatio, nearPlane, farPlane);
     proj[1][1] *= -1; // Vulkan Y-flip
     return proj;
 }

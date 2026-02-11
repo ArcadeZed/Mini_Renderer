@@ -60,6 +60,8 @@ add_executable(MiniRenderer
         src/rendering/RenderEngine.h
         src/rendering/ForwardPass.cpp
         src/rendering/ForwardPass.h
+        src/rendering/ShadowPass.cpp
+        src/rendering/ShadowPass.h
         src/rendering/TextureManager.cpp
         src/rendering/TextureManager.h
         src/rendering/MaterialManager.cpp

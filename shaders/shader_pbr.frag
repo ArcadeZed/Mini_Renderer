@@ -7,23 +7,32 @@ layout(location = 3) in vec2 fragUV;
 layout(location = 4) in vec3 fragTangent;
 layout(location = 5) in vec3 fragBitangent;
 layout(location = 6) flat in int fragMaterialIndex;
+layout(location = 7) in vec4 fragPosLightSpace;  // Position in light space
+
+// GPU-aligned light structure (matches C++ GPULight)
+struct GPULight {
+    vec4 positionAndType;   // xyz = position, w = type (0=Point, 1=Directional, 2=Spot)
+    vec4 colorAndIntensity; // rgb = color, a = intensity
+    vec4 directionAndRange; // xyz = direction (normalized), w = range
+    vec4 attenuation;       // x = constant, y = linear, z = quadratic, w = unused
+};
 
 // Global uniform buffer (Set 0, Binding 0)
 layout(set = 0, binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
-    vec3 lightPos;
-    vec3 lightColor;
     vec3 viewPos;
+    int lightCount;         // Number of active lights (0-8)
     float ambientStrength;
     float shininess;
-    float lightIntensity;
-    float attenuationConstant;
-    float attenuationLinear;
-    float attenuationQuadratic;
-    float metalness;   // Fallback if no material buffer
-    float roughness;   // Fallback if no material buffer
+    float metalness;        // Fallback if no material buffer
+    float roughness;        // Fallback if no material buffer
+    GPULight lights[8];     // Array of lights
+    mat4 lightSpaceMatrix;  // Light space transform for shadow mapping
 } ubo;
+
+// Shadow map sampler (Set 0, Binding 2)
+layout(set = 0, binding = 2) uniform sampler2D shadowMap;
 
 // Material storage buffer (Set 1, Binding 0)
 struct GPUMaterial {
@@ -87,10 +96,45 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     return ggx1 * ggx2;
 }
 
+// PCF (Percentage Closer Filtering) for soft shadows
+// Returns 0.0 (fully shadowed) to 1.0 (fully lit)
+float calculateShadow(vec4 fragPosLightSpace, vec3 normal, vec3 lightDir) {
+    // Perform perspective divide
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+
+    // Transform XY to [0,1] range (from [-1,1] NDC)
+    // Z is already in [0,1] due to GLM_FORCE_DEPTH_ZERO_TO_ONE in Vulkan
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+
+    // Outside shadow map bounds → fully lit
+    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0) {
+        return 1.0;
+    }
+
+    // Current fragment depth
+    float currentDepth = projCoords.z;
+
+    // Bias to prevent shadow acne (angle-dependent)
+    float bias = max(0.005 * (1.0 - dot(normal, lightDir)), 0.0005);
+
+    // PCF (sample 3x3 kernel)
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
+    for (int x = -1; x <= 1; ++x) {
+        for (int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            shadow += currentDepth - bias > pcfDepth ? 0.0 : 1.0;
+        }
+    }
+    shadow /= 9.0;  // Average of 9 samples
+
+    return shadow;
+}
+
 void main() {
     // Fetch material from buffer
     GPUMaterial material = materialBuffer.materials[fragMaterialIndex];
-
 
     // Sample textures
     vec3 baseColor = material.baseColorFactor.rgb;
@@ -124,51 +168,83 @@ void main() {
         N = normalize(TBN * tangentNormal);
     }
 
-    // View and light directions
+    // View direction (same for all lights)
     vec3 V = normalize(ubo.viewPos - fragPos);
-    vec3 L = normalize(ubo.lightPos - fragPos);
-    vec3 H = normalize(V + L);
-
-    // Distance-based attenuation
-    float distance = length(ubo.lightPos - fragPos);
-    float attenuation = 1.0 / (ubo.attenuationConstant +
-                               ubo.attenuationLinear * distance +
-                               ubo.attenuationQuadratic * (distance * distance));
-    vec3 radiance = ubo.lightColor * ubo.lightIntensity * attenuation;
 
     // Calculate F0 (base reflectivity)
     // Dielectrics: ~0.04, Metals: baseColor
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, baseColor, metallic);
 
-    // Cook-Torrance BRDF
-    float NdotL = max(dot(N, L), 0.0);
-    float NdotV = max(dot(N, V), 0.0);
-    float HdotV = max(dot(H, V), 0.0);
+    // Accumulate lighting from all lights
+    vec3 Lo = vec3(0.0);
+    for (int i = 0; i < ubo.lightCount && i < 8; ++i) {
+        GPULight light = ubo.lights[i];
+        int lightType = int(light.positionAndType.w);
 
-    // D, F, G terms
-    float D = DistributionGGX(N, H, roughness);
-    vec3 F = FresnelSchlick(HdotV, F0);
-    float G = GeometrySmith(N, V, L, roughness);
+        // Light direction based on type
+        vec3 L;
+        float attenuation = 1.0;
 
-    // Specular BRDF
-    vec3 numerator = D * F * G;
-    float denominator = 4.0 * NdotV * NdotL + 0.0001;
-    vec3 specular = numerator / denominator;
+        if (lightType == 0) {  // Point Light
+            vec3 lightPos = light.positionAndType.xyz;
+            L = normalize(lightPos - fragPos);
 
-    // Energy conservation
-    vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
-    kD *= (1.0 - metallic);  // Metals have no diffuse
+            // Distance-based attenuation
+            float distance = length(lightPos - fragPos);
+            if (distance > light.directionAndRange.w) {
+                continue;  // Beyond light range, skip this light
+            }
+            attenuation = 1.0 / (light.attenuation.x +
+                                 light.attenuation.y * distance +
+                                 light.attenuation.z * distance * distance);
+        } else if (lightType == 1) {  // Directional Light
+            L = normalize(-light.directionAndRange.xyz);
+            attenuation = 1.0;  // No attenuation for directional lights
+        } else {  // Spot Light (future)
+            continue;  // Skip for now
+        }
 
-    // Lambert diffuse
-    vec3 diffuse = kD * baseColor / PI;
+        vec3 H = normalize(V + L);
 
-    // Final lighting
-    vec3 Lo = (diffuse + specular) * radiance * NdotL;
+        // Radiance for this light
+        vec3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.a * attenuation;
 
-    // Ambient + emissive
-    vec3 ambient = vec3(0.03) * baseColor;
+        // Cook-Torrance BRDF
+        float NdotL = max(dot(N, L), 0.0);
+        float NdotV = max(dot(N, V), 0.0);
+        float HdotV = max(dot(H, V), 0.0);
+
+        // D, F, G terms
+        float D = DistributionGGX(N, H, roughness);
+        vec3 F = FresnelSchlick(HdotV, F0);
+        float G = GeometrySmith(N, V, L, roughness);
+
+        // Specular BRDF
+        vec3 numerator = D * F * G;
+        float denominator = 4.0 * NdotV * NdotL + 0.0001;
+        vec3 specular = numerator / denominator;
+
+        // Energy conservation
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= (1.0 - metallic);  // Metals have no diffuse
+
+        // Lambert diffuse
+        vec3 diffuse = kD * baseColor / PI;
+
+        // Shadow calculation (only for directional lights for now)
+        float shadow = 1.0;  // Default: no shadow (fully lit)
+        if (lightType == 1) {  // Directional Light
+            shadow = calculateShadow(fragPosLightSpace, N, L);
+        }
+
+        // Accumulate this light's contribution (attenuated by shadow)
+        Lo += (diffuse + specular) * radiance * NdotL * shadow;
+    }
+
+    // Ambient + emissive (independent of lights)
+    vec3 ambient = ubo.ambientStrength * baseColor;
     vec3 emissive = material.emissiveFactor;
     if (material.textureIndices.w >= 0) {
         emissive *= texture(textures[material.textureIndices.w], fragUV).rgb;
