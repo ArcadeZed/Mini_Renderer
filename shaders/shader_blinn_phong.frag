@@ -4,6 +4,9 @@ layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec3 fragPos;
 layout(location = 3) in vec2 fragUV;
+layout(location = 4) in vec3 fragTangent;      // Unused in Blinn-Phong (for compatibility)
+layout(location = 5) in vec3 fragBitangent;    // Unused in Blinn-Phong (for compatibility)
+layout(location = 6) flat in int fragMaterialIndex;  // Unused in Blinn-Phong (for compatibility)
 
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;

@@ -1,10 +1,88 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "rendering/RenderEngine.h"
+#include "mesh/GLTFLoader.h"
 #include <imgui.h>
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
+
+// Test function for glTF loading + full PBR integration
+void testGLTFLoader(RenderEngine& engine) {
+    std::cout << "\n=== Loading Mech Drone with PBR ===" << std::endl;
+
+    GLTFModel model;
+    bool success = GLTFLoader::loadGLTF("main_sponza/NewSponza_Main_glTF_003.gltf", model);
+
+    if (!success) {
+        std::cerr << "[FAILED] Could not load glTF file!" << std::endl;
+        std::cout << "=========================\n" << std::endl;
+        return;
+    }
+
+    std::cout << "\n[SUCCESS] glTF file loaded!" << std::endl;
+    std::cout << "  Total Meshes: " << model.meshes.size() << std::endl;
+    std::cout << "  Total Materials: " << model.materials.size() << std::endl;
+    std::cout << "  Total Textures: " << model.textures.size() << std::endl;
+
+    // Show first material details
+    if (!model.materials.empty()) {
+        const auto& mat = model.materials[0];
+        std::cout << "\nFirst Material '" << mat.name << "':" << std::endl;
+        std::cout << "  Base Color Factor: (" << mat.baseColorFactor.r << ", "
+                  << mat.baseColorFactor.g << ", " << mat.baseColorFactor.b << ")" << std::endl;
+        std::cout << "  Metallic Factor: " << mat.metallicFactor << std::endl;
+        std::cout << "  Roughness Factor: " << mat.roughnessFactor << std::endl;
+        std::cout << "  BaseColor Texture Index: " << mat.baseColorTextureIndex << std::endl;
+        std::cout << "  Normal Texture Index: " << mat.normalTextureIndex << std::endl;
+        std::cout << "  MetallicRoughness Texture Index: " << mat.metallicRoughnessTextureIndex << std::endl;
+    }
+
+    // Show first texture details
+    if (!model.textures.empty()) {
+        const auto& tex = model.textures[0];
+        std::cout << "\nFirst Texture:" << std::endl;
+        std::cout << "  URI: " << tex.uri << std::endl;
+        std::cout << "  Full Path: " << tex.fullPath << std::endl;
+    }
+
+    std::cout << "\n=== Integrating into Renderer ===" << std::endl;
+    std::cout << "Loading " << model.textures.size() << " textures..." << std::endl;
+
+    // Step 1: Load all textures with TextureManager
+    std::vector<std::string> texturePaths;
+    for (const auto& tex : model.textures) {
+        texturePaths.push_back(tex.fullPath);
+    }
+
+    std::vector<int> textureIndices = engine.loadTextures(texturePaths);
+    std::cout << "Loaded " << textureIndices.size() << " textures into GPU." << std::endl;
+
+    // Step 2: Upload all materials to MaterialManager
+    std::cout << "Uploading " << model.materials.size() << " materials..." << std::endl;
+    std::vector<int> materialIndices = engine.uploadMaterials(model.materials, textureIndices);
+    std::cout << "Uploaded " << materialIndices.size() << " materials to GPU." << std::endl;
+
+    // Step 3: Add all meshes to the scene
+    std::cout << "Adding " << model.meshes.size() << " meshes to scene..." << std::endl;
+    for (size_t i = 0; i < model.meshes.size(); i++) {
+        const auto& gltfMesh = model.meshes[i];
+
+        // Convert and upload mesh to GPU
+        SceneObject obj = engine.createSceneObjectFromGLTF(gltfMesh, materialIndices);
+        obj.name = gltfMesh.name;
+
+        engine.addSceneObject(std::move(obj));
+    }
+    std::cout << "Added " << model.meshes.size() << " meshes to scene." << std::endl;
+
+    // Step 4: Switch to PBR shader
+    std::cout << "Activating PBR shader..." << std::endl;
+    engine.setPBRShader();
+
+    std::cout << "\n[SUCCESS] Sponza loaded with PBR rendering!" << std::endl;
+    std::cout << "=========================\n" << std::endl;
+}
 
 // Global variables for window position (needed for restore after minimize)
 static int g_windowPosX = 0;
@@ -231,6 +309,9 @@ int main() {
     try {
         engine.init(window);  // Start empty - use Drag & Drop to load meshes
         std::cout << "RenderEngine initialized (empty scene - drag & drop .obj files to load)." << std::endl;
+
+        // TEST: glTF loader - Load Sponza with PBR
+        testGLTFLoader(engine);
 
         // Load camera state from file (if exists)
         engine.getCamera().loadState("camera_state.txt");

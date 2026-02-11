@@ -39,9 +39,10 @@ struct UniformBufferObject {
     alignas(4) float roughness;  // PBR: 0 = smooth, 1 = rough
 };
 
-// Push constants for per-object data (model matrix)
+// Push constants for per-object data (model matrix + material index)
 struct PushConstantObject {
     alignas(16) glm::mat4 model;
+    alignas(4) int materialIndex;  // Index into material buffer (for PBR shaders)
 };
 
 // Primitive types for procedural mesh generation
@@ -66,6 +67,15 @@ public:
     // Dynamic loading at runtime
     void loadMesh(const std::string& filepath);
     void loadTexture(const std::string& filepath);
+
+    // glTF integration helpers
+    std::vector<int> loadTextures(const std::vector<std::string>& paths);
+    std::vector<int> uploadMaterials(const std::vector<struct GLTFMaterial>& materials,
+                                     const std::vector<int>& textureIndices);
+    SceneObject createSceneObjectFromGLTF(const struct GLTFMeshData& gltfMesh,
+                                          const std::vector<int>& materialIndices);
+    void addSceneObject(SceneObject&& obj);
+    void setPBRShader();
 
     // Window resize handling
     void setFramebufferResized(bool resized) { framebufferResized = resized; }
@@ -104,6 +114,7 @@ private:
     void createDescriptorPool();
     void createDescriptorSets();
     void updateUniformBuffer(uint32_t currentImage);
+    void updatePBRDescriptorSet();  // Update Set 1 with material buffer + texture array
 
     void createTextureImage();  // Legacy - for single texture meshes
     void createTextureImageView();  // Legacy
@@ -135,6 +146,10 @@ private:
     std::unique_ptr<DebugRenderer> debugRenderer;
     std::unique_ptr<ImGuiOverlay> imguiOverlay;
 
+    // PBR asset managers
+    std::unique_ptr<class TextureManager> textureManager;
+    std::unique_ptr<class MaterialManager> materialManager;
+
     // ImGui interactive parameters
     ImGuiParams imguiParams;
     int previousLightingModelIndex = 0;  // Track lighting model changes
@@ -149,8 +164,10 @@ private:
     VkImageView depthImageView = VK_NULL_HANDLE;
 
     // Descriptors
-    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> descriptorSets;
+    VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;  // Set 0: Global UBO
+    VkDescriptorSetLayout pbrDescriptorSetLayout = VK_NULL_HANDLE;  // Set 1: Material SSBO + Texture Array
+    std::vector<VkDescriptorSet> descriptorSets;  // Set 0 (per-frame)
+    std::vector<VkDescriptorSet> pbrDescriptorSets;  // Set 1 (shared across frames)
 
     // Uniform Buffers
     std::vector<VkBuffer> uniformBuffers;

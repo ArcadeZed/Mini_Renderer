@@ -4,10 +4,13 @@
 #include "../core/DescriptorManager.h"
 #include "../mesh/MeshLoader.h"
 #include "../mesh/PrimitiveMeshGenerator.h"
+#include "../mesh/GLTFLoader.h"
 #include "ForwardPass.h"
 #include "PhongLighting.h"
 #include "BlinnPhongLighting.h"
 #include "PBRLighting.h"
+#include "TextureManager.h"
+#include "MaterialManager.h"
 #include "../debug/DebugRenderer.h"
 #include "../debug/ImGuiOverlay.h"
 #include <stdexcept>
@@ -96,6 +99,15 @@ void RenderEngine::initVulkan() {
     command.init(&context);
     resource.init(&context, &command);
 
+    // Initialize PBR asset managers
+    textureManager = std::make_unique<TextureManager>(&context, &command, &resource);
+    textureManager->setMaxTextureSize(1024);  // Limit texture size to save VRAM (4096→1024)
+    materialManager = std::make_unique<MaterialManager>(&context, &command, &resource);
+
+    // Add default fallback material at index 0 (for primitives and objects without glTF materials)
+    materialManager->addDefaultMaterial();
+    materialManager->uploadToGPU();
+
     // Create shared Vulkan resources
     createRenderPass();
     createDepthResources();
@@ -123,6 +135,9 @@ void RenderEngine::initVulkan() {
     createDescriptorPool();
     createDescriptorSets();
 
+    // Update PBR descriptor set with default material buffer + texture array
+    updatePBRDescriptorSet();
+
     // Create material descriptor sets after pool creation (per-object)
     for (auto& obj : scene.objects) {
         if (obj.useMultiMaterial) {
@@ -133,7 +148,9 @@ void RenderEngine::initVulkan() {
     // Initialize render sub-systems (AFTER render pass + descriptor layout exist)
     forwardPass = std::make_unique<ForwardPass>();
     forwardPass->init(context.getDevice(), *shaderManager,
-                      swapchain.getExtent(), descriptorSetLayout, renderPass);
+                      swapchain.getExtent(), descriptorSetLayout,
+                      pbrDescriptorSetLayout, renderPass,
+                      materialManager.get());  // Pass MaterialManager for alpha mode queries
 
     debugRenderer = std::make_unique<DebugRenderer>();
     debugRenderer->init(context.getDevice(), *shaderManager,
@@ -219,6 +236,7 @@ void RenderEngine::createRenderPass() {
 // ============================================================================
 
 void RenderEngine::createDescriptorSetLayout() {
+    // Set 0: Global UBO + Single Texture (for Phong/Blinn-Phong)
     VkDescriptorSetLayoutBinding uboBinding{};
     uboBinding.binding = 0;
     uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -232,6 +250,21 @@ void RenderEngine::createDescriptorSetLayout() {
     samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     descriptorSetLayout = descriptorManager->createLayout({uboBinding, samplerBinding});
+
+    // Set 1: Material Buffer SSBO + Texture Array (for PBR)
+    VkDescriptorSetLayoutBinding materialBufferBinding{};
+    materialBufferBinding.binding = 0;  // Binding 0 in Set 1
+    materialBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    materialBufferBinding.descriptorCount = 1;
+    materialBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding textureArrayBinding{};
+    textureArrayBinding.binding = 1;  // Binding 1 in Set 1
+    textureArrayBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    textureArrayBinding.descriptorCount = 128;  // Max 128 textures
+    textureArrayBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    pbrDescriptorSetLayout = descriptorManager->createLayout({materialBufferBinding, textureArrayBinding});
 }
 
 void RenderEngine::createUniformBuffers() {
@@ -251,15 +284,17 @@ void RenderEngine::createUniformBuffers() {
 void RenderEngine::createDescriptorPool() {
     // Increased pool size to support multi-material meshes (up to 50 materials)
     const uint32_t MAX_MATERIAL_SETS = 50;
-    const uint32_t TOTAL_SETS = MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS;
+    const uint32_t TOTAL_SETS = MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 1;  // +1 for PBR set
 
     descriptorManager->createPool({
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, TOTAL_SETS},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, TOTAL_SETS}
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT + MAX_MATERIAL_SETS + 128},  // +128 for texture array
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}  // Material buffer SSBO
     }, TOTAL_SETS);
 }
 
 void RenderEngine::createDescriptorSets() {
+    // Set 0: Per-frame sets (UBO + fallback texture)
     descriptorSets = descriptorManager->allocateSets(descriptorSetLayout,
                                                       static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT));
 
@@ -269,6 +304,14 @@ void RenderEngine::createDescriptorSets() {
         descriptorManager->writeImage(descriptorSets[i], 1,
                                        textureImageView, textureSampler);
     }
+
+    // Set 1: PBR descriptor set (Material SSBO + Texture Array)
+    // Allocate 1 set (shared across frames, no per-frame data)
+    pbrDescriptorSets = descriptorManager->allocateSets(pbrDescriptorSetLayout, 1);
+
+    // Note: Material buffer and texture array will be written later via updatePBRDescriptorSet()
+    // after materials/textures are loaded
+
     std::cout << "Descriptor sets created." << std::endl;
 }
 
@@ -301,6 +344,63 @@ void RenderEngine::updateUniformBuffer(uint32_t currentImage) {
     vkMapMemory(context.getDevice(), uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
     memcpy(data, &ubo, sizeof(ubo));
     vkUnmapMemory(context.getDevice(), uniformBuffersMemory[currentImage]);
+}
+
+void RenderEngine::updatePBRDescriptorSet() {
+    std::cout << "[DEBUG RenderEngine] updatePBRDescriptorSet() called" << std::endl;
+
+    if (pbrDescriptorSets.empty()) {
+        std::cerr << "  [ERROR] pbrDescriptorSets is empty!" << std::endl;
+        return;
+    }
+
+    VkDescriptorSet pbrSet = pbrDescriptorSets[0];
+    std::cout << "  - PBR Descriptor Set handle: " << pbrSet << std::endl;
+
+    // Binding 0: Material Buffer SSBO (in Set 1)
+    VkBuffer materialBuffer = materialManager->getBuffer();
+    std::cout << "  - Material Buffer handle: " << materialBuffer << std::endl;
+    std::cout << "  - Material count: " << materialManager->getMaterialCount() << std::endl;
+
+    if (materialBuffer != VK_NULL_HANDLE) {
+        VkDeviceSize bufferSize = materialManager->getMaterialCount() * sizeof(GPUMaterial);
+        std::cout << "  - Writing material buffer to descriptor (size: " << bufferSize << " bytes)" << std::endl;
+        descriptorManager->writeBuffer(pbrSet, 0, materialBuffer, bufferSize, 0,
+                                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+    } else {
+        std::cerr << "  [ERROR] Material buffer is VK_NULL_HANDLE!" << std::endl;
+    }
+
+    // Binding 1: Texture Array (in Set 1)
+    size_t textureCount = textureManager->getTextureCount();
+    if (textureCount > 0) {
+        std::vector<VkDescriptorImageInfo> imageInfos;
+        imageInfos.reserve(128);  // Max 128 textures
+
+        // Fill with actual textures
+        for (size_t i = 0; i < textureCount && i < 128; i++) {
+            const GPUTexture& texture = textureManager->getTexture(static_cast<int>(i));
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = texture.imageView;
+            imageInfo.sampler = texture.sampler;
+            imageInfos.push_back(imageInfo);
+        }
+
+        // Fill remaining slots with fallback texture to reach descriptorCount=128
+        VkDescriptorImageInfo fallbackInfo{};
+        fallbackInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        fallbackInfo.imageView = textureImageView;  // Use engine's fallback texture
+        fallbackInfo.sampler = textureSampler;
+
+        while (imageInfos.size() < 128) {
+            imageInfos.push_back(fallbackInfo);
+        }
+
+        descriptorManager->writeImageArray(pbrSet, 1, imageInfos);
+        std::cout << "PBR descriptor set updated: " << textureCount
+                  << " textures bound." << std::endl;
+    }
 }
 
 // ============================================================================
@@ -604,9 +704,12 @@ void RenderEngine::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
 
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // 1. Scene objects (Phong + texture)
-    // Each object has its own material descriptor sets - no global list needed
-    forwardPass->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT], scene);
+    // 1. Scene objects (Phong/Blinn-Phong/PBR + textures)
+    // Pass both descriptor sets: Set 0 (per-frame UBO) + Set 1 (shared PBR resources)
+    forwardPass->record(cmd,
+                        descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT],
+                        pbrDescriptorSets.empty() ? VK_NULL_HANDLE : pbrDescriptorSets[0],
+                        scene);
 
     // 2. Debug visualization (grid + axes) - conditional on ImGui toggles
     debugRenderer->record(cmd, descriptorSets[currentFrame % MAX_FRAMES_IN_FLIGHT],
@@ -807,6 +910,14 @@ void RenderEngine::cleanup() {
 
     // Shader manager
     shaderManager.reset();
+
+    // PBR asset managers - MUST cleanup BEFORE context
+    if (materialManager) {
+        materialManager->cleanup();
+    }
+    if (textureManager) {
+        textureManager->cleanup();
+    }
 
     // Swapchain - BEFORE VulkanContext
     swapchain.cleanup();
@@ -1216,5 +1327,98 @@ void RenderEngine::createMaterialDescriptorSets(SceneObject& object) {
     }
 
     std::cout << "All material descriptor sets created for this object!" << std::endl;
+}
+
+// ============================================================================
+// glTF Integration Helpers
+// ============================================================================
+
+std::vector<int> RenderEngine::loadTextures(const std::vector<std::string>& paths) {
+    if (!textureManager) {
+        std::cerr << "TextureManager not initialized!" << std::endl;
+        return {};
+    }
+    return textureManager->loadTextures(paths, true);  // generateMipmaps=true
+}
+
+std::vector<int> RenderEngine::uploadMaterials(const std::vector<GLTFMaterial>& materials,
+                                                const std::vector<int>& textureIndices) {
+    if (!materialManager) {
+        std::cerr << "MaterialManager not initialized!" << std::endl;
+        return {};
+    }
+
+    std::vector<int> materialIndices;
+    materialIndices.reserve(materials.size());
+
+    for (const auto& gltfMat : materials) {
+        // Convert glTF material indices to global texture indices
+        GLTFMaterial convertedMat = gltfMat;
+
+        // Map glTF texture indices to global texture indices
+        if (gltfMat.baseColorTextureIndex >= 0 && gltfMat.baseColorTextureIndex < textureIndices.size()) {
+            convertedMat.baseColorTextureIndex = textureIndices[gltfMat.baseColorTextureIndex];
+        }
+        if (gltfMat.metallicRoughnessTextureIndex >= 0 && gltfMat.metallicRoughnessTextureIndex < textureIndices.size()) {
+            convertedMat.metallicRoughnessTextureIndex = textureIndices[gltfMat.metallicRoughnessTextureIndex];
+        }
+        if (gltfMat.normalTextureIndex >= 0 && gltfMat.normalTextureIndex < textureIndices.size()) {
+            convertedMat.normalTextureIndex = textureIndices[gltfMat.normalTextureIndex];
+        }
+        if (gltfMat.emissiveTextureIndex >= 0 && gltfMat.emissiveTextureIndex < textureIndices.size()) {
+            convertedMat.emissiveTextureIndex = textureIndices[gltfMat.emissiveTextureIndex];
+        }
+
+        int matIndex = materialManager->addMaterial(convertedMat, 0);  // textureIndexOffset=0
+        materialIndices.push_back(matIndex);
+    }
+
+    // Upload all materials to GPU as SSBO
+    materialManager->uploadToGPU();
+
+    // Update PBR descriptor set with new material buffer + texture array
+    updatePBRDescriptorSet();
+
+    return materialIndices;
+}
+
+SceneObject RenderEngine::createSceneObjectFromGLTF(const GLTFMeshData& gltfMesh,
+                                                     const std::vector<int>& materialIndices) {
+    SceneObject obj;
+
+    // Convert GLTFMeshData to Mesh
+    GLTFLoader::convertToMesh(gltfMesh, obj.mesh, glm::vec3(1.0f, 1.0f, 1.0f));
+
+    // Upload to GPU
+    obj.mesh.upload(context.getDevice(), resource, command);
+
+    // Set transform from glTF node hierarchy
+    obj.transform.setCustomMatrix(gltfMesh.transform);
+
+    // Set material index
+    if (gltfMesh.materialIndex >= 0 && gltfMesh.materialIndex < materialIndices.size()) {
+        obj.materialIndex = materialIndices[gltfMesh.materialIndex];
+    } else {
+        obj.materialIndex = 0;  // Fallback material
+    }
+
+    // Set name
+    obj.name = gltfMesh.name.empty() ? "GLTFMesh" : gltfMesh.name;
+
+    return obj;
+}
+
+void RenderEngine::addSceneObject(SceneObject&& obj) {
+    scene.objects.push_back(std::move(obj));
+}
+
+void RenderEngine::setPBRShader() {
+    if (!forwardPass) {
+        std::cerr << "ForwardPass not initialized!" << std::endl;
+        return;
+    }
+
+    static PBRLighting pbrLighting;
+    forwardPass->setLightingModel(&pbrLighting);
 }
 

@@ -41,6 +41,11 @@ public:
                     VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     VkDescriptorType type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
+    // Write an array of image descriptors (for texture arrays).
+    void writeImageArray(VkDescriptorSet set, uint32_t binding,
+                         const std::vector<VkDescriptorImageInfo>& imageInfos,
+                         VkDescriptorType type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+
     // Destroy all managed layouts and the pool.
     void cleanup();
 

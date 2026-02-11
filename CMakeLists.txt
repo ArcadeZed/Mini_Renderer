@@ -60,6 +60,10 @@ add_executable(MiniRenderer
         src/rendering/RenderEngine.h
         src/rendering/ForwardPass.cpp
         src/rendering/ForwardPass.h
+        src/rendering/TextureManager.cpp
+        src/rendering/TextureManager.h
+        src/rendering/MaterialManager.cpp
+        src/rendering/MaterialManager.h
         src/debug/DebugRenderer.cpp
         src/debug/DebugRenderer.h
         src/debug/ImGuiOverlay.cpp
@@ -82,6 +86,8 @@ add_executable(MiniRenderer
         src/mesh/Mesh.h
         src/mesh/MeshLoader.cpp
         src/mesh/MeshLoader.h
+        src/mesh/GLTFLoader.cpp
+        src/mesh/GLTFLoader.h
         src/scene/Camera.cpp
         src/scene/Camera.h
         src/scene/Transform.h
@@ -100,6 +106,7 @@ target_link_libraries(MiniRenderer
 target_include_directories(MiniRenderer PRIVATE
         ${Vulkan_INCLUDE_DIRS}
         external/glfw/include
+        external/tinygltf
         src
 )
 
@@ -114,3 +121,122 @@ if(ENABLE_VALIDATION_LAYERS)
 else()
     message(STATUS "Vulkan Validation Layers: DISABLED (use -DENABLE_VALIDATION_LAYERS=ON to enable)")
 endif()
+
+# # Optional: Test executable for glTF loader
+# add_executable(test_gltf_loader
+#         test_gltf_loader.cpp
+#         src/mesh/GLTFLoader.cpp
+#         src/mesh/GLTFLoader.h
+# )
+# target_include_directories(test_gltf_loader PRIVATE
+#         external                                    # For stb_image.h
+#         external/tinygltf/examples/common/glm       # For GLM
+#         external/tinygltf
+#         src
+# )
+# target_compile_definitions(test_gltf_loader PRIVATE
+#         TEST_GLTF_LOADER  # Tell GLTFLoader.cpp to define STB_IMAGE_IMPLEMENTATION
+# )
+# 
+# # Optional: Test executable for texture loading
+# add_executable(test_texture_loading
+#         test_texture_loading.cpp
+#         src/rendering/TextureManager.cpp
+#         src/rendering/TextureManager.h
+#         src/core/VulkanContext.cpp
+#         src/core/VulkanCommand.cpp
+#         src/core/VulkanResource.cpp
+#         src/mesh/GLTFLoader.cpp
+# )
+# target_include_directories(test_texture_loading PRIVATE
+#         ${Vulkan_INCLUDE_DIRS}
+#         external
+#         external/tinygltf/examples/common/glm
+#         external/tinygltf
+#         external/glfw/include
+#         src
+# )
+# target_link_libraries(test_texture_loading PRIVATE
+#         Vulkan::Vulkan
+#         glfw
+# )
+# target_compile_definitions(test_texture_loading PRIVATE
+#         TEST_GLTF_LOADER  # Tell GLTFLoader.cpp to define STB_IMAGE_IMPLEMENTATION
+# )
+# 
+# # Optional: Test executable for mesh GPU upload
+# add_executable(test_mesh_upload
+#         test_mesh_upload.cpp
+#         src/mesh/GLTFLoader.cpp
+#         src/mesh/GLTFLoader.h
+#         src/mesh/Mesh.cpp
+#         src/mesh/Mesh.h
+#         src/core/VulkanContext.cpp
+#         src/core/VulkanCommand.cpp
+#         src/core/VulkanResource.cpp
+# )
+# target_include_directories(test_mesh_upload PRIVATE
+#         ${Vulkan_INCLUDE_DIRS}
+#         external
+#         external/tinygltf/examples/common/glm
+#         external/tinygltf
+#         external/glfw/include
+#         src
+# )
+# target_link_libraries(test_mesh_upload PRIVATE
+#         Vulkan::Vulkan
+#         glfw
+# )
+# target_compile_definitions(test_mesh_upload PRIVATE
+#         TEST_GLTF_LOADER  # Tell GLTFLoader.cpp to define STB_IMAGE_IMPLEMENTATION
+# )
+# 
+# # Optional: Simple mesh test (no glTF loading)
+# add_executable(test_mesh_simple
+#         test_mesh_simple.cpp
+#         src/mesh/GLTFLoader.cpp
+#         src/mesh/Mesh.cpp
+#         src/core/VulkanContext.cpp
+#         src/core/VulkanCommand.cpp
+#         src/core/VulkanResource.cpp
+# )
+# target_include_directories(test_mesh_simple PRIVATE
+#         ${Vulkan_INCLUDE_DIRS}
+#         external/tinygltf/examples/common/glm
+#         external/tinygltf
+#         external/glfw/include
+#         src
+# )
+# target_link_libraries(test_mesh_simple PRIVATE
+#         Vulkan::Vulkan
+#         glfw
+# )
+# target_compile_definitions(test_mesh_simple PRIVATE
+#         TEST_GLTF_LOADER
+# )
+# 
+# # Optional: Test executable for material upload
+# add_executable(test_material_upload
+#         test_material_upload.cpp
+#         src/rendering/MaterialManager.cpp
+#         src/mesh/GLTFLoader.cpp
+#         src/mesh/Mesh.cpp
+#         src/core/VulkanContext.cpp
+#         src/core/VulkanCommand.cpp
+#         src/core/VulkanResource.cpp
+# )
+# target_include_directories(test_material_upload PRIVATE
+#         ${Vulkan_INCLUDE_DIRS}
+#         external
+#         external/tinygltf/examples/common/glm
+#         external/tinygltf
+#         external/glfw/include
+#         src
+# )
+# target_link_libraries(test_material_upload PRIVATE
+#         Vulkan::Vulkan
+#         glfw
+# )
+# target_compile_definitions(test_material_upload PRIVATE
+#         TEST_GLTF_LOADER
+# )

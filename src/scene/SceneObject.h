@@ -25,6 +25,9 @@ struct SceneObject {
     std::vector<MaterialResources> materialResources;  // One per material in mesh
     bool useMultiMaterial = false;  // Flag: true if mesh has multiple materials
 
+    // Material index for centralized material buffer (PBR shaders)
+    int materialIndex = 0;  // Index into MaterialManager's buffer (default = 0 = fallback material)
+
     // Cleanup GPU resources owned by this object
     void cleanupMaterialResources(VkDevice device) {
         for (auto& matRes : materialResources) {

@@ -24,6 +24,7 @@ struct Vertex {
     glm::vec3 color;
     glm::vec3 normal;
     glm::vec2 uv;
+    glm::vec4 tangent;  // xyz = tangent direction, w = handedness (+1 or -1)
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription desc{};
@@ -33,12 +34,13 @@ struct Vertex {
         return desc;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 4> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 4> attrs{};
+    static std::array<VkVertexInputAttributeDescription, 5> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 5> attrs{};
         attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)};
         attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, color)};
         attrs[2] = {2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, normal)};
         attrs[3] = {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex, uv)};
+        attrs[4] = {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Vertex, tangent)};
         return attrs;
     }
 };

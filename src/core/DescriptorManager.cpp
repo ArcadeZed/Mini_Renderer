@@ -98,6 +98,21 @@ void DescriptorManager::writeImage(VkDescriptorSet set, uint32_t binding,
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }
 
+void DescriptorManager::writeImageArray(VkDescriptorSet set, uint32_t binding,
+                                         const std::vector<VkDescriptorImageInfo>& imageInfos,
+                                         VkDescriptorType type) {
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = set;
+    write.dstBinding = binding;
+    write.dstArrayElement = 0;
+    write.descriptorType = type;
+    write.descriptorCount = static_cast<uint32_t>(imageInfos.size());
+    write.pImageInfo = imageInfos.data();
+
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+}
+
 void DescriptorManager::cleanup() {
     if (pool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device, pool, nullptr);
